@@ -6,7 +6,7 @@ const { exec } = require('child_process');
 app.get("/", (req, res) => {
 
 
-exec('which ffmpeg', (err, stdout, stderr) => {
+exec('ffmpeg --help', (err, stdout, stderr) => {
   if (err) {
     console.error('FFmpeg not found:', stderr);
   } else {
@@ -14,7 +14,7 @@ exec('which ffmpeg', (err, stdout, stderr) => {
   }
 });
 
-  res.send("Hello World");
+  res.send("Hello World 1");
 });
 
 app.listen(PORT, () => {
