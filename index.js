@@ -5,16 +5,22 @@ const { exec } = require('child_process');
 
 app.get("/", (req, res) => {
 
+const ffmpeg = spawn('/usr/bin/ffmpeg', ['--help']);
 
-exec('ffmpeg --help', (err, stdout, stderr) => {
-  if (err) {
-    console.error('FFmpeg not found:', stderr);
-  } else {
-    console.log('FFmpeg path:', stdout.trim());
-  }
-});
+  ffmpeg.stdout.on('data', (data) => {
+    console.log(`stdout: ${data}`);
+  });
 
-  res.send("Hello World 1");
+  ffmpeg.stderr.on('data', (data) => {
+    console.error(`stderr: ${data}`);
+  });
+
+  ffmpeg.on('close', (code) => {
+    console.log(`FFmpeg exited with code ${code}`);
+    callback(code === 0 ? null : new Error('Conversion failed'));
+  });
+
+  res.send("Hello World");
 });
 
 app.listen(PORT, () => {
