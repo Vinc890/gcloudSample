@@ -1,7 +1,7 @@
 const express = require("express");
 const app = express();
 const PORT = 3000;
-const { exec } = require('child_process');
+const { spawn } = require('child_process');
 
 app.get("/", (req, res) => {
 
