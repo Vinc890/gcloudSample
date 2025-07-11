@@ -76,13 +76,13 @@ app.post("/overlay-audio", async (req, res) => {
     );
     filterParts.push(`[0:a][mixed]amix=inputs=2[aout]`);
 
-    const outputFileName = `output_${Date.now()}.mp4`;
+    const outputFileName = `output_${Date.now()}.webm`;
     const outputPath = path.join(localDir, outputFileName);
 
     const ffmpegCommand = [
       ...ffmpegInputs,
       `-filter_complex "${filterParts.join(";")}"`,
-      `-map 0:v -map "[aout]" -c:v copy -c:a aac -strict experimental`,
+      `-map 0:v -map "[aout]" -c:v copy -c:a aac `,
       `"${outputPath}"`,
     ].join(" ");
 
