@@ -1,24 +1,24 @@
 const express = require("express");
 const app = express();
 const PORT = 3000;
-const { spawn } = require('child_process');
+const { spawn } = require("child_process");
 require("dotenv").config();
+const path = require("path");
 
 app.get("/", (req, res) => {
+  const ffmpeg = spawn("/usr/bin/ffmpeg", ["--help"]);
 
-const ffmpeg = spawn('/usr/bin/ffmpeg', ['--help']);
-
-  ffmpeg.stdout.on('data', (data) => {
+  ffmpeg.stdout.on("data", (data) => {
     console.log(`stdout: ${data}`);
   });
 
-  ffmpeg.stderr.on('data', (data) => {
+  ffmpeg.stderr.on("data", (data) => {
     console.error(`stderr: ${data}`);
   });
 
-  ffmpeg.on('close', (code) => {
+  ffmpeg.on("close", (code) => {
     console.log(`FFmpeg exited with code ${code}`);
-    callback(code === 0 ? null : new Error('Conversion failed'));
+    callback(code === 0 ? null : new Error("Conversion failed"));
   });
 
   res.send("Hello World");
@@ -47,7 +47,9 @@ app.post("/overlay-audio", async (req, res) => {
 
     // Download video and audio files
     const videoPath = await downloadFile(videoFileName);
-    const audioPaths = await Promise.all(audioFiles.map((f) => downloadFile(f.name)));
+    const audioPaths = await Promise.all(
+      audioFiles.map((f) => downloadFile(f.name))
+    );
 
     // Construct ffmpeg input arguments
     const ffmpegInputs = [`-i "${videoPath}"`];
@@ -62,7 +64,9 @@ app.post("/overlay-audio", async (req, res) => {
       mixInputs.push(`[${label}]`);
     });
 
-    filterParts.push(`${mixInputs.join("")}amix=inputs=${audioPaths.length}[mixed]`);
+    filterParts.push(
+      `${mixInputs.join("")}amix=inputs=${audioPaths.length}[mixed]`
+    );
     filterParts.push(`[0:a][mixed]amix=inputs=2[aout]`);
 
     const outputFileName = `output_${Date.now()}.mp4`;
@@ -72,11 +76,13 @@ app.post("/overlay-audio", async (req, res) => {
       ...ffmpegInputs,
       `-filter_complex "${filterParts.join(";")}"`,
       `-map 0:v -map "[aout]" -c:v copy -c:a aac -strict experimental`,
-      `"${outputPath}"`
+      `"${outputPath}"`,
     ].join(" ");
 
     console.log(" Running ffmpeg...");
-    await execPromise(`ffmpeg ${ffmpegCommand}`);
+    // const ffmpeg = spawn('/usr/bin/ffmpeg', ['--help']);
+
+    await execPromise(`/usr/bin/ffmpeg ${ffmpegCommand}`);
 
     // Upload final output back to bucket
     const destinationPath = `${folder}/${outputFileName}`;
