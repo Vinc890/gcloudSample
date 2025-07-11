@@ -82,7 +82,7 @@ app.post("/overlay-audio", async (req, res) => {
     const ffmpegCommand = [
       ...ffmpegInputs,
       `-filter_complex "${filterParts.join(";")}"`,
-      `-map 0:v -map "[aout]" -c:v copy -c:a aac `,
+      `-map 0:v -map "[aout]" -c:v copy -c:a libvorbis `,
       `"${outputPath}"`,
     ].join(" ");
 
