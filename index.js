@@ -4,6 +4,13 @@ const PORT = 3000;
 const { spawn } = require("child_process");
 require("dotenv").config();
 const path = require("path");
+const fs = require("fs");
+const { Storage } = require("@google-cloud/storage");
+const { exec } = require("child_process");
+
+const execPromise = util.promisify(exec);
+
+const storage = new Storage();
 
 app.get("/", (req, res) => {
   const ffmpeg = spawn("/usr/bin/ffmpeg", ["--help"]);
