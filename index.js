@@ -2,6 +2,7 @@ const express = require("express");
 const app = express();
 const PORT = 3000;
 const { spawn } = require('child_process');
+require("dotenv").config();
 
 app.get("/", (req, res) => {
 
