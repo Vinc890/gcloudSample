@@ -12,9 +12,9 @@ const execPromise = util.promisify(exec);
 const multer = require("multer");
 // const upload = multer({ dest: "tmp/" });
 const storage = new Storage();
+const ffmpeg = require("fluent-ffmpeg");
 const upload = multer({ dest: "uploads/" });
-const { spawn } = require("child_process");
-const fs = require("fs");
+const ffmpeg = require("fluent-ffmpeg");
 
 app.get("/", (req, res) => {
   const ffmpeg = spawn("/usr/bin/ffmpeg", ["--help"]);
@@ -169,61 +169,36 @@ app.post("/uploadChunks", upload.any(), async (req, res) => {
   }
 });
 
-function overlayMultipleAudios(videoPath, overlays, outputPath) {
+async function overlayMultipleAudios(videoPath, overlays, outputPath) {
   return new Promise((resolve, reject) => {
-    const args = ["-y"]; // Overwrite output
+    const ffmpegCmd = ffmpeg(videoPath);
 
-    // 0: Input video
-    args.push("-i", videoPath);
-
-    // 1-N: Input audio overlays
-    overlays.forEach((o) => {
-      args.push("-i", o.localPath);
+    // Add overlay inputs
+    overlays.forEach(({ localPath }) => {
+      ffmpegCmd.input(localPath);
     });
 
-    // Build filter_complex
-    const filterParts = [];
-    const audioLabels = ["[0:a]"];
+    // Construct complex filter
+    let filter = "";
+    const inputs = ["[0:a]"]; // Original audio
 
-    overlays.forEach((o, idx) => {
-      const delay = o.start * 1000;
-      const label = `[a${idx + 1}]`;
-      // Apply delay using adelay
-      filterParts.push(`[${idx + 1}:a]adelay=${delay}|${delay}${label}`);
-      audioLabels.push(label);
+    overlays.forEach((overlay, i) => {
+      const label = `[a${i + 1}]`;
+      const delay = overlay.start * 1000;
+      filter += `[${i + 1}:a]adelay=${delay}|${delay}${label};`;
+      inputs.push(label);
     });
 
-    // Mix all audio streams
-    const mixInputs = audioLabels.join("");
-    filterParts.push(
-      `${mixInputs}amix=inputs=${audioLabels.length}:duration=first:dropout_transition=2[aout]`
-    );
+    filter += `${inputs.join("")}amix=inputs=${
+      inputs.length
+    }:duration=first:dropout_transition=2[aout]`;
 
-    args.push("-filter_complex", filterParts.join(";"));
-    args.push("-map", "0:v"); // keep video stream
-    args.push("-map", "[aout]"); // final mixed audio
-    args.push("-c:v", "copy"); // copy video codec
-    args.push(outputPath);
-
-    const ffmpeg = spawn("ffmpeg", args);
-
-    ffmpeg.stderr.on("data", (data) => {
-      console.log(`stderr: ${data}`);
-    });
-
-    ffmpeg.on("error", (error) => {
-      console.error(`FFmpeg error: ${error.message}`);
-      reject(error);
-    });
-
-    ffmpeg.on("close", (code) => {
-      if (code === 0) {
-        console.log("FFmpeg finished successfully");
-        resolve();
-      } else {
-        reject(new Error(`FFmpeg exited with code ${code}`));
-      }
-    });
+    ffmpegCmd
+      .complexFilter(filter, ["aout"])
+      .outputOptions("-map", "0:v", "-map", "[aout]")
+      .on("end", resolve)
+      .on("error", reject)
+      .save(outputPath);
   });
 }
 
