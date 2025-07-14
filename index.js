@@ -198,6 +198,104 @@ app.post("/overlay-audio", upload.array("videos"), async (req, res) => {
   }
 });
 
+const TEMP_DIR = path.join(__dirname, "tmp");
+if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR);
+
+const bucketName = "zimulate";
+const folder = "GoogleFunctions";
+
+app.post("/upload-chunk", upload.single("chunk"), async (req, res) => {
+  try {
+    const { start, stop, recordingStartedAt } = req.body;
+
+    if (!recordingStartedAt) return res.status(400).send("Missing timestamp");
+
+    const tempVideoPath = path.join(TEMP_DIR, `${recordingStartedAt}.webm`);
+
+    if (start === "true" && fs.existsSync(tempVideoPath)) {
+      fs.unlinkSync(tempVideoPath); // cleanup any previous runs
+    }
+
+    if (req.file) {
+      fs.appendFileSync(tempVideoPath, req.file.buffer);
+    }
+
+    if (stop === "true") {
+      const finalFileName = `${recordingStartedAt}_final.webm`;
+      const finalPath = path.join(TEMP_DIR, finalFileName);
+
+      fs.renameSync(tempVideoPath, finalPath);
+
+      // Upload final video
+      const destinationPath = `${folder}/${finalFileName}`;
+      await storage.bucket(bucketName).upload(finalPath, {
+        destination: destinationPath,
+        contentType: "video/webm",
+      });
+
+      // Overlay audio
+      const audioFiles = [
+        { name: "tt1.mp3", delay: 20 },
+        { name: "tt2.mp3", delay: 30 },
+        { name: "tt3.mp3", delay: 30 },
+      ];
+
+      const audioPaths = [];
+      for (const { name } of audioFiles) {
+        const audioPath = path.join(TEMP_DIR, name);
+        const file = storage.bucket(bucketName).file(`${folder}/${name}`);
+        await file.download({ destination: audioPath });
+        audioPaths.push(audioPath);
+      }
+
+      const ffmpegInputs = [`-i "${finalPath}"`];
+      const filterParts = [];
+      const mixInputs = [];
+
+      audioPaths.forEach((p, i) => {
+        const delay = audioFiles[i].delay * 1000;
+        const label = `a${i}`;
+        ffmpegInputs.push(`-i "${p}"`);
+        filterParts.push(`[${i + 1}:a]adelay=${delay}|${delay}[${label}]`);
+        mixInputs.push(`[${label}]`);
+      });
+
+      filterParts.push(`${mixInputs.join("")}amix=inputs=${audioPaths.length}[mixed]`);
+      filterParts.push(`[0:a][mixed]amix=inputs=2[aout]`);
+
+      const outputWithAudio = path.join(TEMP_DIR, `output_${recordingStartedAt}.webm`);
+
+      const cmd = [
+        ...ffmpegInputs,
+        `-filter_complex "${filterParts.join(";")}"`,
+        `-map 0:v -map "[aout]" -c:v copy -c:a libvorbis "${outputWithAudio}"`,
+      ].join(" ");
+
+      await execPromise(`/usr/bin/ffmpeg ${cmd}`);
+
+      await storage.bucket(bucketName).upload(outputWithAudio, {
+        destination: `${folder}/output_${recordingStartedAt}.webm`,
+        contentType: "video/webm",
+      });
+
+      // Clean up
+      fs.unlinkSync(finalPath);
+      fs.unlinkSync(outputWithAudio);
+      audioPaths.forEach((p) => fs.unlinkSync(p));
+
+      return res.json({
+        message: "✅ Recording completed, uploaded and audio overlayed.",
+        outputUrl: `gs://${bucketName}/${folder}/output_${recordingStartedAt}.webm`,
+      });
+    }
+
+    res.json({ message: "✅ Chunk received." });
+  } catch (err) {
+    console.error("❌ Error handling chunk:", err);
+    res.status(500).send("Chunk handling failed.");
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
 });
