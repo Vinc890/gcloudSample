@@ -10,9 +10,11 @@ const { exec } = require("child_process");
 const util = require("util");
 const execPromise = util.promisify(exec);
 const multer = require("multer");
-const upload = multer({ dest: "tmp/" });
-
+// const upload = multer({ dest: "tmp/" });
 const storage = new Storage();
+const upload = multer({ dest: "uploads/" });
+const { spawn } = require("child_process");
+const fs = require("fs");
 
 app.get("/", (req, res) => {
   const ffmpeg = spawn("/usr/bin/ffmpeg", ["--help"]);
@@ -111,15 +113,16 @@ app.get("/", (req, res) => {
 //   }
 // });
 
-const bucketName = 'zimulate';
+const bucketName = "zimulate";
 
-app.post('/uploadChunks', upload.any(), async (req, res) => {
+app.post("/uploadChunks", upload.any(), async (req, res) => {
   try {
-    const audioOverlayMeta = JSON.parse(req.body.audioOverlays || '[]');
+    const audioOverlayMeta = JSON.parse(req.body.audioOverlays || "[]");
     const tempFilePath = `tmp-${Date.now()}.webm`;
 
     // 1. Combine Chunks into a Single File
-    const chunkFiles = req.files.filter(f => f.fieldname.startsWith('chunk-'))
+    const chunkFiles = req.files
+      .filter((f) => f.fieldname.startsWith("chunk-"))
       .sort((a, b) => a.originalname.localeCompare(b.originalname));
     const writeStream = fs.createWriteStream(tempFilePath);
     for (const file of chunkFiles) {
@@ -128,16 +131,21 @@ app.post('/uploadChunks', upload.any(), async (req, res) => {
     }
     writeStream.end();
 
-    writeStream.on('finish', async () => {
+    writeStream.on("finish", async () => {
       const mergedPath = `final-${Date.now()}.webm`;
 
       // 2. Download Audio Overlay Files from GCS
-      const overlayPaths = await Promise.all(audioOverlayMeta.map(async (overlay, idx) => {
-        const tempAudio = `audio_${idx}_${Date.now()}.mp3`;
-        const destPath = path.join(__dirname, tempAudio);
-        await storage.bucket(bucketName).file(`GoogleFunctions/Audios/${overlay.file}`).download({ destination: destPath });
-        return { ...overlay, localPath: destPath };
-      }));
+      const overlayPaths = await Promise.all(
+        audioOverlayMeta.map(async (overlay, idx) => {
+          const tempAudio = `audio_${idx}_${Date.now()}.mp3`;
+          const destPath = path.join(__dirname, tempAudio);
+          await storage
+            .bucket(bucketName)
+            .file(`GoogleFunctions/Audios/${overlay.file}`)
+            .download({ destination: destPath });
+          return { ...overlay, localPath: destPath };
+        })
+      );
 
       // 3. Overlay Audios
       await overlayMultipleAudios(tempFilePath, overlayPaths, mergedPath);
@@ -153,42 +161,69 @@ app.post('/uploadChunks', upload.any(), async (req, res) => {
       fs.unlinkSync(mergedPath);
       overlayPaths.forEach(({ localPath }) => fs.unlinkSync(localPath));
 
-      res.status(200).send('Video uploaded with audio overlays');
+      res.status(200).send("Video uploaded with audio overlays");
     });
   } catch (err) {
     console.error(err);
-    res.status(500).send('Processing error');
+    res.status(500).send("Processing error");
   }
 });
 
-async function overlayMultipleAudios(videoPath, overlays, outputPath) {
+function overlayMultipleAudios(videoPath, overlays, outputPath) {
   return new Promise((resolve, reject) => {
-    const ffmpegCmd = ffmpeg(videoPath);
+    const args = ["-y"]; // Overwrite output
 
-    // Add overlay inputs
-    overlays.forEach(({ localPath }) => {
-      ffmpegCmd.input(localPath);
+    // 0: Input video
+    args.push("-i", videoPath);
+
+    // 1-N: Input audio overlays
+    overlays.forEach((o) => {
+      args.push("-i", o.localPath);
     });
 
-    // Construct complex filter
-    let filter = '';
-    const inputs = ['[0:a]']; // Original audio
+    // Build filter_complex
+    const filterParts = [];
+    const audioLabels = ["[0:a]"];
 
-    overlays.forEach((overlay, i) => {
-      const label = `[a${i + 1}]`;
-      const delay = overlay.start * 1000;
-      filter += `[${i + 1}:a]adelay=${delay}|${delay}${label};`;
-      inputs.push(label);
+    overlays.forEach((o, idx) => {
+      const delay = o.start * 1000;
+      const label = `[a${idx + 1}]`;
+      // Apply delay using adelay
+      filterParts.push(`[${idx + 1}:a]adelay=${delay}|${delay}${label}`);
+      audioLabels.push(label);
     });
 
-    filter += `${inputs.join('')}amix=inputs=${inputs.length}:duration=first:dropout_transition=2[aout]`;
+    // Mix all audio streams
+    const mixInputs = audioLabels.join("");
+    filterParts.push(
+      `${mixInputs}amix=inputs=${audioLabels.length}:duration=first:dropout_transition=2[aout]`
+    );
 
-    ffmpegCmd
-      .complexFilter(filter, ['aout'])
-      .outputOptions('-map', '0:v', '-map', '[aout]')
-      .on('end', resolve)
-      .on('error', reject)
-      .save(outputPath);
+    args.push("-filter_complex", filterParts.join(";"));
+    args.push("-map", "0:v"); // keep video stream
+    args.push("-map", "[aout]"); // final mixed audio
+    args.push("-c:v", "copy"); // copy video codec
+    args.push(outputPath);
+
+    const ffmpeg = spawn("ffmpeg", args);
+
+    ffmpeg.stderr.on("data", (data) => {
+      console.log(`stderr: ${data}`);
+    });
+
+    ffmpeg.on("error", (error) => {
+      console.error(`FFmpeg error: ${error.message}`);
+      reject(error);
+    });
+
+    ffmpeg.on("close", (code) => {
+      if (code === 0) {
+        console.log("FFmpeg finished successfully");
+        resolve();
+      } else {
+        reject(new Error(`FFmpeg exited with code ${code}`));
+      }
+    });
   });
 }
 
