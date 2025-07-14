@@ -8,15 +8,11 @@ const fs = require("fs");
 const { Storage } = require("@google-cloud/storage");
 const { exec } = require("child_process");
 const util = require("util");
-const { promisify } = require('util');
 const execPromise = util.promisify(exec);
 const multer = require("multer");
-const upload = multer({ dest: "temp_chunks/" });
-const tmp = require('tmp');
-const execAsync = promisify(exec);
+const upload = multer({ dest: "tmp/" });
 
 const storage = new Storage();
-app.use(express.json());
 
 app.get("/", (req, res) => {
   const ffmpeg = spawn("/usr/bin/ffmpeg", ["--help"]);
@@ -37,214 +33,165 @@ app.get("/", (req, res) => {
   res.send("Hello World");
 });
 
-app.post("/overlay-audio", async (req, res) => {
-  try {
-    const bucketName = "zimulate";
-    const folder = "GoogleFunctions";
-    const videoFileName = "v1.webm";
-    const audioFiles = [
-      { name: "tt1.mp3", delay: 20 },
-      { name: "tt2.mp3", delay: 30 },
-      { name: "tt3.mp3", delay: 30 },
-    ];
+// app.post("/overlay-audio", async (req, res) => {
+//   try {
+//     const bucketName = "zimulate";
+//     const folder = "GoogleFunctions";
+//     const videoFileName = "v1.webm";
+//     const audioFiles = [
+//       { name: "tt1.mp3", delay: 20 },
+//       { name: "tt2.mp3", delay: 30 },
+//       { name: "tt3.mp3", delay: 30 },
+//     ];
 
-    const localDir = path.join(__dirname, "tmp");
-    if (!fs.existsSync(localDir)) fs.mkdirSync(localDir);
+//     const localDir = path.join(__dirname, "tmp");
+//     if (!fs.existsSync(localDir)) fs.mkdirSync(localDir);
 
-    const downloadFile = async (fileName) => {
-      const localPath = path.join(localDir, fileName);
-      const file = storage.bucket(bucketName).file(`${folder}/${fileName}`);
-      await file.download({ destination: localPath });
-      return localPath;
-    };
+//     const downloadFile = async (fileName) => {
+//       const localPath = path.join(localDir, fileName);
+//       const file = storage.bucket(bucketName).file(`${folder}/${fileName}`);
+//       await file.download({ destination: localPath });
+//       return localPath;
+//     };
 
-    // Download video and audio files
-    const videoPath = await downloadFile(videoFileName);
-    const audioPaths = await Promise.all(
-      audioFiles.map((f) => downloadFile(f.name))
-    );
+//     // Download video and audio files
+//     const videoPath = await downloadFile(videoFileName);
+//     const audioPaths = await Promise.all(
+//       audioFiles.map((f) => downloadFile(f.name))
+//     );
 
-    // Construct ffmpeg input arguments
-    const ffmpegInputs = [`-i "${videoPath}"`];
-    const filterParts = [];
-    const mixInputs = [];
+//     // Construct ffmpeg input arguments
+//     const ffmpegInputs = [`-i "${videoPath}"`];
+//     const filterParts = [];
+//     const mixInputs = [];
 
-    audioPaths.forEach((audioPath, index) => {
-      ffmpegInputs.push(`-i "${audioPath}"`);
-      const delay = audioFiles[index].delay * 1000;
-      const label = `a${index}`;
-      filterParts.push(`[${index + 1}:a]adelay=${delay}|${delay}[${label}]`);
-      mixInputs.push(`[${label}]`);
-    });
+//     audioPaths.forEach((audioPath, index) => {
+//       ffmpegInputs.push(`-i "${audioPath}"`);
+//       const delay = audioFiles[index].delay * 1000;
+//       const label = `a${index}`;
+//       filterParts.push(`[${index + 1}:a]adelay=${delay}|${delay}[${label}]`);
+//       mixInputs.push(`[${label}]`);
+//     });
 
-    filterParts.push(
-      `${mixInputs.join("")}amix=inputs=${audioPaths.length}[mixed]`
-    );
-    filterParts.push(`[0:a][mixed]amix=inputs=2[aout]`);
+//     filterParts.push(
+//       `${mixInputs.join("")}amix=inputs=${audioPaths.length}[mixed]`
+//     );
+//     filterParts.push(`[0:a][mixed]amix=inputs=2[aout]`);
 
-    const outputFileName = `output_${Date.now()}.webm`;
-    const outputPath = path.join(localDir, outputFileName);
+//     const outputFileName = `output_${Date.now()}.webm`;
+//     const outputPath = path.join(localDir, outputFileName);
 
-    const ffmpegCommand = [
-      ...ffmpegInputs,
-      `-filter_complex "${filterParts.join(";")}"`,
-      `-map 0:v -map "[aout]" -c:v copy -c:a libvorbis `,
-      `"${outputPath}"`,
-    ].join(" ");
+//     const ffmpegCommand = [
+//       ...ffmpegInputs,
+//       `-filter_complex "${filterParts.join(";")}"`,
+//       `-map 0:v -map "[aout]" -c:v copy -c:a libvorbis `,
+//       `"${outputPath}"`,
+//     ].join(" ");
 
-    console.log(" Running ffmpeg...");
+//     console.log(" Running ffmpeg...");
 
-    await execPromise(`/usr/bin/ffmpeg ${ffmpegCommand}`);
+//     await execPromise(`/usr/bin/ffmpeg ${ffmpegCommand}`);
 
-    const destinationPath = `${folder}/${outputFileName}`;
-    await storage.bucket(bucketName).upload(outputPath, {
-      destination: destinationPath,
-      contentType: "video/mp4",
-    });
+//     const destinationPath = `${folder}/${outputFileName}`;
+//     await storage.bucket(bucketName).upload(outputPath, {
+//       destination: destinationPath,
+//       contentType: "video/mp4",
+//     });
 
-    console.log(`✅ Uploaded to GCS: ${destinationPath}`);
-    res.json({ outputUrl: `gs://${bucketName}/${destinationPath}` });
+//     console.log(`✅ Uploaded to GCS: ${destinationPath}`);
+//     res.json({ outputUrl: `gs://${bucketName}/${destinationPath}` });
 
-    // Cleanup
-    [videoPath, ...audioPaths, outputPath].forEach((filePath) => {
-      fs.unlinkSync(filePath);
-    });
-  } catch (err) {
-    console.error("❌ Error in /overlay-audio:", err);
-    res.status(500).send(`Overlay failed.${err}`);
-  }
-});
+//     // Cleanup
+//     [videoPath, ...audioPaths, outputPath].forEach((filePath) => {
+//       fs.unlinkSync(filePath);
+//     });
+//   } catch (err) {
+//     console.error("❌ Error in /overlay-audio:", err);
+//     res.status(500).send(`Overlay failed.${err}`);
+//   }
+// });
 
-const sessions = {};
 const bucketName = 'zimulate';
-const folderName = 'GoogleFunctions';
-const audioFiles = [
-  { name: 'tt1.mp3', delay: 20 },
-  { name: 'tt2.mp3', delay: 30 },
-  { name: 'tt3.mp3', delay: 30 },
-];
 
-app.post('/record', async (req, res) => {
-  const { start, stop, sessionId, startTimestamp } = req.body;
+app.post('/uploadChunks', upload.any(), async (req, res) => {
+  try {
+    const audioOverlayMeta = JSON.parse(req.body.audioOverlays || '[]');
+    const tempFilePath = `tmp-${Date.now()}.webm`;
 
-  if (start) {
-    sessions[sessionId] = {
-      startTimestamp,
-      chunks: [],
-    };
-    fs.mkdirSync(`recordings/${sessionId}`, { recursive: true });
-    return res.sendStatus(200);
-  }
+    // 1. Combine Chunks into a Single File
+    const chunkFiles = req.files.filter(f => f.fieldname.startsWith('chunk-'))
+      .sort((a, b) => a.originalname.localeCompare(b.originalname));
+    const writeStream = fs.createWriteStream(tempFilePath);
+    for (const file of chunkFiles) {
+      writeStream.write(fs.readFileSync(file.path));
+      fs.unlinkSync(file.path);
+    }
+    writeStream.end();
 
-  if (stop) {
-    const session = sessions[sessionId];
-    if (!session) return res.status(404).send('Session not found');
+    writeStream.on('finish', async () => {
+      const mergedPath = `final-${Date.now()}.webm`;
 
-    const outputFileName = `${session.startTimestamp}.webm`;
-    const outputPath = `final_videos/${outputFileName}`;
+      // 2. Download Audio Overlay Files from GCS
+      const overlayPaths = await Promise.all(audioOverlayMeta.map(async (overlay, idx) => {
+        const tempAudio = `audio_${idx}_${Date.now()}.mp3`;
+        const destPath = path.join(__dirname, tempAudio);
+        await storage.bucket(bucketName).file(`GoogleFunctions/Audios/${overlay.file}`).download({ destination: destPath });
+        return { ...overlay, localPath: destPath };
+      }));
 
-    mergeChunks(sessionId, outputPath)
-      .then(() => uploadToBucket(outputPath, outputFileName))
-      .then(() => overlayAudio(outputPath, session.startTimestamp))
-      .then(() => res.sendStatus(200))
-      .catch(err => {
-        console.error(err);
-        res.sendStatus(500);
+      // 3. Overlay Audios
+      await overlayMultipleAudios(tempFilePath, overlayPaths, mergedPath);
+
+      // 4. Upload Final Video
+      await storage.bucket(bucketName).upload(mergedPath, {
+        destination: `GoogleFunctions/Videos/${path.basename(mergedPath)}`,
+        resumable: false,
       });
 
-    return;
+      // 5. Cleanup
+      fs.unlinkSync(tempFilePath);
+      fs.unlinkSync(mergedPath);
+      overlayPaths.forEach(({ localPath }) => fs.unlinkSync(localPath));
+
+      res.status(200).send('Video uploaded with audio overlays');
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Processing error');
   }
-
-  res.sendStatus(400);
 });
 
-app.post('/upload', upload.single('videoChunk'), (req, res) => {
-  const { sessionId } = req.body;
-  const session = sessions[sessionId];
-  if (!session) return res.status(404).send('Session not found');
-
-  const chunkPath = `recordings/${sessionId}/${Date.now()}-${req.file.originalname}`;
-  fs.renameSync(req.file.path, chunkPath);
-  session.chunks.push(chunkPath);
-
-  res.sendStatus(200);
-});
-
-function mergeChunks(sessionId, outputPath) {
+async function overlayMultipleAudios(videoPath, overlays, outputPath) {
   return new Promise((resolve, reject) => {
-    const session = sessions[sessionId];
-    const files = session.chunks;
+    const ffmpegCmd = ffmpeg(videoPath);
 
-    const mergedList = `recordings/${sessionId}/input.txt`;
-    const fileContent = files.map(f => `file '${path.resolve(f)}'`).join('\n');
-    fs.writeFileSync(mergedList, fileContent);
+    // Add overlay inputs
+    overlays.forEach(({ localPath }) => {
+      ffmpegCmd.input(localPath);
+    });
 
-    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    // Construct complex filter
+    let filter = '';
+    const inputs = ['[0:a]']; // Original audio
 
-    ffmpeg()
-      .input(mergedList)
-      .inputOptions(['-f', 'concat', '-safe', '0'])
-      .outputOptions(['-c', 'copy'])
-      .on('end', () => resolve())
+    overlays.forEach((overlay, i) => {
+      const label = `[a${i + 1}]`;
+      const delay = overlay.start * 1000;
+      filter += `[${i + 1}:a]adelay=${delay}|${delay}${label};`;
+      inputs.push(label);
+    });
+
+    filter += `${inputs.join('')}amix=inputs=${inputs.length}:duration=first:dropout_transition=2[aout]`;
+
+    ffmpegCmd
+      .complexFilter(filter, ['aout'])
+      .outputOptions('-map', '0:v', '-map', '[aout]')
+      .on('end', resolve)
       .on('error', reject)
       .save(outputPath);
   });
 }
 
-async function uploadToBucket(localPath, destFileName) {
-  const destination = `${folderName}/${destFileName}`;
-  await storage.bucket(bucketName).upload(localPath, {
-    destination,
-    gzip: true,
-    metadata: { cacheControl: 'no-cache' },
-  });
-  console.log(`Uploaded ${destFileName} to ${bucketName}/${folderName}`);
-}
-
-async function overlayAudio(videoPath, startTimestamp) {
-  const tmpDir = tmp.dirSync().name;
-  const inputs = [];
-  const filters = [];
-  let filterCount = 0;
-
-  for (let i = 0; i < audioFiles.length; i++) {
-    const { name, delay } = audioFiles[i];
-    const gcsPath = `https://storage.googleapis.com/${bucketName}/${folderName}/${name}`;
-    const localPath = path.join(tmpDir, name);
-
-    const response = await axios.get(gcsPath, { responseType: 'stream' });
-    const writer = fs.createWriteStream(localPath);
-    await new Promise((resolve, reject) => {
-      response.data.pipe(writer);
-      writer.on('finish', resolve);
-      writer.on('error', reject);
-    });
-
-    inputs.push(`-i "${localPath}"`);
-    filters.push(`[${filterCount + 1}:a]adelay=${delay * 1000}|${delay * 1000}[a${i}]`);
-    filterCount++;
-  }
-
-  const filterComplex = [
-    ...filters,
-    `amix=inputs=${audioFiles.length + 1}:duration=shortest:dropout_transition=0[aout]`,
-  ].join('; ');
-
-  const outputPath = videoPath.replace('.webm', '_final.mp4');
-  const cmd = `ffmpeg -y -i "${videoPath}" ${inputs.join(' ')} -filter_complex "${filterComplex}" -map 0:v -map "[aout]" -c:v copy -shortest "${outputPath}"`;
-
-  try {
-    console.log("Running ffmpeg overlay command...");
-    await execAsync(cmd);
-    await uploadToBucket(outputPath, `${startTimestamp}_final.mp4`);
-    console.log("Final video uploaded with overlayed audio.");
-  } catch (err) {
-    console.error("Error overlaying audio:", err);
-    throw err;
-  }
-}
-
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
 });
-
