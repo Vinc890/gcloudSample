@@ -298,27 +298,7 @@
 //   console.log(`Server is running on http://localhost:${PORT}`);
 // });
 
-
-
-
-
-
-
-
-
-
-
 // -------------------------------------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
 
 // require("dotenv").config();
 // const express = require("express");
@@ -455,29 +435,7 @@
 //   console.log(`🚀 Server is running on http://localhost:${PORT}`);
 // });
 
-
-
-
-
-
-
-
-
-
-
-
 // -------------------------------------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
 
 const express = require("express");
 const multer = require("multer");
@@ -488,7 +446,7 @@ const { TextToSpeechClient } = require("@google-cloud/text-to-speech");
 const util = require("util");
 const execPromise = util.promisify(require("child_process").exec);
 const cors = require("cors");
-const PORT = 3000
+const PORT = 3000;
 
 const app = express();
 app.use(express.json());
@@ -519,15 +477,19 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
   const chunkPath = path.join(chunkDir, `chunk_${index}`);
   fs.writeFileSync(chunkPath, req.file.buffer);
 
-  const receivedChunks = fs.readdirSync(chunkDir).filter(f => f.startsWith("chunk_")).length;
-  console.log(`📥 Received chunk ${index}. Total received: ${receivedChunks}/${totalChunks}`);
+  const receivedChunks = fs
+    .readdirSync(chunkDir)
+    .filter((f) => f.startsWith("chunk_")).length;
+  console.log(
+    `📥 Received chunk ${index}. Total received: ${receivedChunks}/${totalChunks}`
+  );
 
   if (receivedChunks == parseInt(totalChunks)) {
     console.log("📦 All chunks received. Starting merge...");
 
     const chunkFiles = fs
       .readdirSync(chunkDir)
-      .filter(f => f.startsWith("chunk_"))
+      .filter((f) => f.startsWith("chunk_"))
       .sort((a, b) => parseInt(a.split("_")[1]) - parseInt(b.split("_")[1]));
 
     const mergedPath = path.join(chunkDir, "merged.webm");
@@ -547,7 +509,9 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
         contentType: "video/webm",
       });
 
-      console.log(`✅ Merged video uploaded to gs://${SESSION_BUCKET}/${gcsPath}`);
+      console.log(
+        `✅ Merged video uploaded to gs://${SESSION_BUCKET}/${gcsPath}`
+      );
 
       res.status(200).json({
         message: "Chunks uploaded and video merged.",
@@ -563,7 +527,6 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
     res.status(200).send("Chunk received");
   }
 });
-
 
 // TTS Generation
 
@@ -609,6 +572,18 @@ app.post("/overlay", upload.none(), async (req, res) => {
       return res.status(400).send("Missing sessionId or baseTimestamp");
     }
 
+    const [sessionFiles] = await storage
+      .bucket(SESSION_BUCKET)
+      .getFiles({ prefix: `${ROOT_FOLDER}/${sessionId}/` });
+
+    await Promise.all(
+      sessionFiles
+        .filter((file) => !file.name.includes("/Final/"))
+        .map((file) => file.delete())
+    );
+
+    console.log(`🧹 Cleaned up old session files for: ${sessionId}`);
+
     const sessionFolder = path.join(TMP, ROOT_FOLDER, sessionId);
     fs.mkdirSync(sessionFolder, { recursive: true });
 
@@ -625,19 +600,18 @@ app.post("/overlay", upload.none(), async (req, res) => {
 
     const audioFiles = [];
 
-for (const file of files) {
-  const filename = path.basename(file.name);
-  const match = filename.match(/^tts_\d+_(\d+)\.mp3$/);
-  if (!match) continue;
+    for (const file of files) {
+      const filename = path.basename(file.name);
+      const match = filename.match(/^tts_\d+_(\d+)\.mp3$/);
+      if (!match) continue;
 
-  const timestamp = parseInt(match[1]);
-  const delay = Math.max(0, timestamp - parseInt(baseTimestamp)); // in ms
-  const localPath = path.join(sessionFolder, filename);
+      const timestamp = parseInt(match[1]);
+      const delay = Math.max(0, timestamp - parseInt(baseTimestamp)); // in ms
+      const localPath = path.join(sessionFolder, filename);
 
-  await file.download({ destination: localPath });
-  audioFiles.push({ path: localPath, delay });
-}
-
+      await file.download({ destination: localPath });
+      audioFiles.push({ path: localPath, delay });
+    }
 
     if (audioFiles.length === 0) {
       return res.status(400).send("No valid TTS audio files found.");
@@ -650,11 +624,15 @@ for (const file of files) {
     audioFiles.forEach((file, i) => {
       ffmpegInputs.push(`-i "${file.path}"`);
       const label = `a${i}`;
-      filterParts.push(`[${i + 1}:a]adelay=${file.delay}|${file.delay}[${label}]`);
+      filterParts.push(
+        `[${i + 1}:a]adelay=${file.delay}|${file.delay}[${label}]`
+      );
       mixInputs.push(`[${label}]`);
     });
 
-    filterParts.push(`${mixInputs.join("")}amix=inputs=${mixInputs.length}[aout]`);
+    filterParts.push(
+      `${mixInputs.join("")}amix=inputs=${mixInputs.length}[aout]`
+    );
 
     const finalOutputName = `final_${Date.now()}.webm`;
     const finalOutputPath = path.join(sessionFolder, finalOutputName);
@@ -663,7 +641,7 @@ for (const file of files) {
       ...ffmpegInputs,
       `-filter_complex "${filterParts.join(";")}"`,
       `-map 0:v -map "[aout]" -c:v copy -c:a libvorbis`,
-      `"${finalOutputPath}"`
+      `"${finalOutputPath}"`,
     ].join(" ");
 
     console.log("🎬 Executing ffmpeg overlay...");
@@ -685,10 +663,6 @@ for (const file of files) {
     res.status(500).send("Failed to overlay audio.");
   }
 });
-
-
-
-
 
 app.listen(PORT, () => {
   console.log(`🚀 Server listening on port ${PORT}`);
