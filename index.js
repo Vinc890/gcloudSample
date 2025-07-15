@@ -625,18 +625,19 @@ app.post("/overlay", upload.none(), async (req, res) => {
 
     const audioFiles = [];
 
-    for (const file of files) {
-      const filename = path.basename(file.name);
-      const match = filename.match(/^(\d+)\.mp3$/);
-      if (!match) continue;
+for (const file of files) {
+  const filename = path.basename(file.name);
+  const match = filename.match(/^tts_\d+_(\d+)\.mp3$/);
+  if (!match) continue;
 
-      const timestamp = parseInt(match[1]);
-      const delay = Math.max(0, timestamp - parseInt(baseTimestamp)); // in ms
-      const localPath = path.join(sessionFolder, filename);
+  const timestamp = parseInt(match[1]);
+  const delay = Math.max(0, timestamp - parseInt(baseTimestamp)); // in ms
+  const localPath = path.join(sessionFolder, filename);
 
-      await file.download({ destination: localPath });
-      audioFiles.push({ path: localPath, delay });
-    }
+  await file.download({ destination: localPath });
+  audioFiles.push({ path: localPath, delay });
+}
+
 
     if (audioFiles.length === 0) {
       return res.status(400).send("No valid TTS audio files found.");
