@@ -634,20 +634,40 @@ app.post("/overlay", upload.none(), async (req, res) => {
     const ffmpegCommand = [
       ...ffmpegInputs,
       `-filter_complex "${filterParts.join(";")}"`,
-      `-map 0:v -map "[aout]" -c:v copy -c:a libvorbis`,
+      `-map 0:v -map "[aout]" -c:v copy -c:a libopus -shortest `,
       `"${finalOutputPath}"`,
     ].join(" ");
 
     console.log("🎬 Executing ffmpeg overlay...");
     await execPromise(`/usr/bin/ffmpeg ${ffmpegCommand}`);
 
-    const finalGCSPath = `${ROOT_FOLDER}/${sessionId}/Final/${finalOutputName}`;
+    // const finalGCSPath = `${ROOT_FOLDER}/${sessionId}/Final/${finalOutputName}`;
+    // await storage.bucket(SESSION_BUCKET).upload(finalOutputPath, {
+    //   destination: finalGCSPath,
+    //   contentType: "video/webm",
+    // });
+
+    const finalGCSPath = `${ROOT_FOLDER}/${sessionId}/${finalOutputName}`;
     await storage.bucket(SESSION_BUCKET).upload(finalOutputPath, {
       destination: finalGCSPath,
       contentType: "video/webm",
     });
 
     console.log(`✅ Final video uploaded to ${finalGCSPath}`);
+    //temop
+    await Promise.all([
+      storage.bucket(SESSION_BUCKET).deleteFiles({
+        prefix: `${ROOT_FOLDER}/${sessionId}/Audio/`,
+      }),
+      storage.bucket(SESSION_BUCKET).deleteFiles({
+        prefix: `${ROOT_FOLDER}/${sessionId}/Video/`,
+      }),
+    ]);
+    //here
+    // res.json({
+    //   message: "Overlay complete",
+    //   videoUrl: `https://storage.googleapis.com/${SESSION_BUCKET}/${finalGCSPath}`,
+    // });
     res.json({
       message: "Overlay complete",
       videoUrl: `https://storage.googleapis.com/${SESSION_BUCKET}/${finalGCSPath}`,
