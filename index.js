@@ -506,55 +506,60 @@ const ttsClient = new TextToSpeechClient();
 
 // Upload Video Chunks & Merge
 
-app.post("/uploadChunks", upload.any(), async (req, res) => {
-  try {
-    const files = req.files;
-    if (!files || files.length === 0) {
-      return res.status(400).send("No chunks received");
-    }
+app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
+  const { index, totalChunks, sessionId } = req.body;
 
-    const sortedChunks = files
-      .filter(f => f.fieldname.startsWith("chunk-"))
-      .sort((a, b) => {
-        const aIndex = parseInt(a.fieldname.split("-")[1]);
-        const bIndex = parseInt(b.fieldname.split("-")[1]);
-        return aIndex - bIndex;
-      });
-
-    const localDir = path.join(__dirname, "tmp");
-    if (!fs.existsSync(localDir)) fs.mkdirSync(localDir);
-
-    const outputPath = path.join(localDir, "vv1.webm");
-    const writeStream = fs.createWriteStream(outputPath);
-
-    for (const chunk of sortedChunks) {
-      writeStream.write(chunk.buffer);
-    }
-
-    writeStream.end();
-
-    writeStream.on("finish", async () => {
-      const destinationPath = `GoogleFunctions/vv1.webm`;
-      await storage.bucket("zimulate").upload(outputPath, {
-        destination: destinationPath,
-        contentType: "video/webm",
-      });
-
-      fs.unlinkSync(outputPath);
-      console.log(`✅ Uploaded vv1.webm to GCS`);
-      res.status(200).json({ message: "Upload complete", path: destinationPath });
-    });
-
-    writeStream.on("error", (err) => {
-      console.error("❌ File write error:", err);
-      res.status(500).send("Failed to write video");
-    });
-  } catch (err) {
-    console.error("❌ Error in /uploadChunks:", err);
-    res.status(500).send("Unexpected server error");
+  if (!index || !totalChunks || !sessionId) {
+    return res.status(400).send("Missing index, totalChunks, or sessionId");
   }
-});
 
+  const chunkDir = path.join(TMP, ROOT_FOLDER, sessionId, "chunks");
+  fs.mkdirSync(chunkDir, { recursive: true });
+
+  const chunkPath = path.join(chunkDir, `chunk_${index}`);
+  fs.writeFileSync(chunkPath, req.file.buffer);
+
+  const receivedChunks = fs
+    .readdirSync(chunkDir)
+    .filter(f => /^chunk_\d+$/.test(f)).length;
+
+  console.log(`📦 Received chunk ${index}. Total received: ${receivedChunks}/${totalChunks}`);
+
+  if (receivedChunks == totalChunks) {
+    const concatFile = path.join(chunkDir, "concat_list.txt");
+
+    const chunkFiles = fs
+      .readdirSync(chunkDir)
+      .filter(f => /^chunk_\d+$/.test(f))
+      .sort((a, b) => parseInt(a.split("_")[1]) - parseInt(b.split("_")[1]));
+
+    const concatContent = chunkFiles
+      .map(f => `file '${path.join(chunkDir, f)}'`)
+      .join("\n");
+
+    fs.writeFileSync(concatFile, concatContent);
+
+    const outputVideo = path.join(chunkDir, "merged.webm");
+
+    await execPromise(`ffmpeg -f concat -safe 0 -i "${concatFile}" -c copy "${outputVideo}"`);
+
+    const gcsPath = `${ROOT_FOLDER}/${sessionId}/Video/merged.webm`;
+    await storage.bucket(SESSION_BUCKET).upload(outputVideo, {
+      destination: gcsPath,
+      contentType: "video/webm",
+    });
+
+    console.log(`✅ Video assembled and uploaded to: gs://${SESSION_BUCKET}/${gcsPath}`);
+
+    return res.status(200).json({
+      message: "All chunks uploaded and video assembled.",
+      videoPath: `gs://${SESSION_BUCKET}/${gcsPath}`,
+      videoUrl: `https://storage.googleapis.com/${SESSION_BUCKET}/${gcsPath}`,
+    });
+  }
+
+  res.status(200).send("Chunk received");
+});
 
 
 // TTS Generation
