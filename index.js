@@ -488,7 +488,7 @@ const { TextToSpeechClient } = require("@google-cloud/text-to-speech");
 const util = require("util");
 const execPromise = util.promisify(require("child_process").exec);
 const cors = require("cors");
-const PORT = 8000
+const PORT = 3000
 
 const app = express();
 app.use(express.json());
@@ -563,6 +563,7 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
     res.status(200).send("Chunk received");
   }
 });
+
 
 // TTS Generation
 
@@ -683,6 +684,7 @@ app.post("/overlay", upload.none(), async (req, res) => {
     res.status(500).send("Failed to overlay audio.");
   }
 });
+
 
 
 
