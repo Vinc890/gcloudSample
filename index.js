@@ -488,7 +488,7 @@ const { TextToSpeechClient } = require("@google-cloud/text-to-speech");
 const util = require("util");
 const execPromise = util.promisify(require("child_process").exec);
 const cors = require("cors");
-const PORT = 3000
+const PORT = 8000
 
 const app = express();
 app.use(express.json());
@@ -509,8 +509,8 @@ const ttsClient = new TextToSpeechClient();
 app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
   const { index, totalChunks, sessionId } = req.body;
 
-  if (!index || !totalChunks || !sessionId) {
-    return res.status(400).send("Missing index, totalChunks, or sessionId");
+  if (!index || !totalChunks || !sessionId || !req.file) {
+    return res.status(400).send("Missing required fields or file.");
   }
 
   const chunkDir = path.join(TMP, ROOT_FOLDER, sessionId, "chunks");
@@ -519,48 +519,50 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
   const chunkPath = path.join(chunkDir, `chunk_${index}`);
   fs.writeFileSync(chunkPath, req.file.buffer);
 
-  const receivedChunks = fs
-    .readdirSync(chunkDir)
-    .filter(f => /^chunk_\d+$/.test(f)).length;
+  const receivedChunks = fs.readdirSync(chunkDir).filter(f => f.startsWith("chunk_")).length;
+  console.log(`📥 Received chunk ${index}. Total received: ${receivedChunks}/${totalChunks}`);
 
-  console.log(`📦 Received chunk ${index}. Total received: ${receivedChunks}/${totalChunks}`);
-
-  if (receivedChunks == totalChunks) {
-    const concatFile = path.join(chunkDir, "concat_list.txt");
+  if (receivedChunks == parseInt(totalChunks)) {
+    console.log("📦 All chunks received. Starting merge...");
 
     const chunkFiles = fs
       .readdirSync(chunkDir)
-      .filter(f => /^chunk_\d+$/.test(f))
+      .filter(f => f.startsWith("chunk_"))
       .sort((a, b) => parseInt(a.split("_")[1]) - parseInt(b.split("_")[1]));
 
-    const concatContent = chunkFiles
-      .map(f => `file '${path.join(chunkDir, f)}'`)
-      .join("\n");
+    const mergedPath = path.join(chunkDir, "merged.webm");
+    const writeStream = fs.createWriteStream(mergedPath);
 
-    fs.writeFileSync(concatFile, concatContent);
+    for (const file of chunkFiles) {
+      const buffer = fs.readFileSync(path.join(chunkDir, file));
+      writeStream.write(buffer);
+    }
 
-    const outputVideo = path.join(chunkDir, "merged.webm");
+    writeStream.end();
 
-    await execPromise(`ffmpeg -f concat -safe 0 -i "${concatFile}" -c copy "${outputVideo}"`);
+    writeStream.on("finish", async () => {
+      const gcsPath = `${ROOT_FOLDER}/${sessionId}/Video/merged.webm`;
+      await storage.bucket(SESSION_BUCKET).upload(mergedPath, {
+        destination: gcsPath,
+        contentType: "video/webm",
+      });
 
-    const gcsPath = `${ROOT_FOLDER}/${sessionId}/Video/merged.webm`;
-    await storage.bucket(SESSION_BUCKET).upload(outputVideo, {
-      destination: gcsPath,
-      contentType: "video/webm",
+      console.log(`✅ Merged video uploaded to gs://${SESSION_BUCKET}/${gcsPath}`);
+
+      res.status(200).json({
+        message: "Chunks uploaded and video merged.",
+        videoUrl: `https://storage.googleapis.com/${SESSION_BUCKET}/${gcsPath}`,
+      });
     });
 
-    console.log(`✅ Video assembled and uploaded to: gs://${SESSION_BUCKET}/${gcsPath}`);
-
-    return res.status(200).json({
-      message: "All chunks uploaded and video assembled.",
-      videoPath: `gs://${SESSION_BUCKET}/${gcsPath}`,
-      videoUrl: `https://storage.googleapis.com/${SESSION_BUCKET}/${gcsPath}`,
+    writeStream.on("error", (err) => {
+      console.error("❌ Failed to merge chunks:", err);
+      res.status(500).send("Failed to merge chunks.");
     });
+  } else {
+    res.status(200).send("Chunk received");
   }
-
-  res.status(200).send("Chunk received");
 });
-
 
 // TTS Generation
 
@@ -606,34 +608,33 @@ app.post("/overlay", upload.none(), async (req, res) => {
       return res.status(400).send("Missing sessionId or baseTimestamp");
     }
 
-    const bucketName = SESSION_BUCKET;
-    const folder = `${ROOT_FOLDER}/${sessionId}`;
-    const localDir = path.join(TMP, sessionId);
-    fs.mkdirSync(localDir, { recursive: true });
+    const sessionFolder = path.join(TMP, ROOT_FOLDER, sessionId);
+    fs.mkdirSync(sessionFolder, { recursive: true });
 
-    const videoGCSPath = `${folder}/Video/merged.webm`;
-    const localVideoPath = path.join(localDir, "merged.webm");
-    await storage.bucket(bucketName).file(videoGCSPath).download({
+    const videoGCSPath = `${ROOT_FOLDER}/${sessionId}/Video/merged.webm`;
+    const localVideoPath = path.join(sessionFolder, "merged.webm");
+
+    await storage.bucket(SESSION_BUCKET).file(videoGCSPath).download({
       destination: localVideoPath,
     });
 
-    const [files] = await storage.bucket(bucketName).getFiles({
-      prefix: `${folder}/Audio/`,
-    });
+    const [files] = await storage
+      .bucket(SESSION_BUCKET)
+      .getFiles({ prefix: `${ROOT_FOLDER}/${sessionId}/Audio/` });
 
     const audioFiles = [];
 
-    for (let file of files) {
+    for (const file of files) {
       const filename = path.basename(file.name);
-      const match = filename.match(/^tts_(\d+)_/);
+      const match = filename.match(/^(\d+)\.mp3$/);
       if (!match) continue;
 
-      const ttsTime = parseInt(match[1]);
-      const delayMs = Math.max(0, ttsTime - parseInt(baseTimestamp));
+      const timestamp = parseInt(match[1]);
+      const delay = Math.max(0, timestamp - parseInt(baseTimestamp)); // in ms
+      const localPath = path.join(sessionFolder, filename);
 
-      const localPath = path.join(localDir, filename);
       await file.download({ destination: localPath });
-      audioFiles.push({ path: localPath, delay: delayMs });
+      audioFiles.push({ path: localPath, delay });
     }
 
     if (audioFiles.length === 0) {
@@ -651,37 +652,35 @@ app.post("/overlay", upload.none(), async (req, res) => {
       mixInputs.push(`[${label}]`);
     });
 
-    // Only mix the delayed TTS files together (no original audio mixed in)
     filterParts.push(`${mixInputs.join("")}amix=inputs=${mixInputs.length}[aout]`);
 
-    const outputFile = `final_${Date.now()}.webm`;
-    const localOutputPath = path.join(localDir, outputFile);
-    const destinationPath = `${folder}/Final/${outputFile}`;
+    const finalOutputName = `final_${Date.now()}.webm`;
+    const finalOutputPath = path.join(sessionFolder, finalOutputName);
 
     const ffmpegCommand = [
       ...ffmpegInputs,
       `-filter_complex "${filterParts.join(";")}"`,
       `-map 0:v -map "[aout]" -c:v copy -c:a libvorbis`,
-      `"${localOutputPath}"`,
+      `"${finalOutputPath}"`
     ].join(" ");
 
-    console.log("🎬 Running ffmpeg:");
-    console.log(ffmpegCommand);
+    console.log("🎬 Executing ffmpeg overlay...");
     await execPromise(`/usr/bin/ffmpeg ${ffmpegCommand}`);
 
-    await storage.bucket(bucketName).upload(localOutputPath, {
-      destination: destinationPath,
+    const finalGCSPath = `${ROOT_FOLDER}/${sessionId}/Final/${finalOutputName}`;
+    await storage.bucket(SESSION_BUCKET).upload(finalOutputPath, {
+      destination: finalGCSPath,
       contentType: "video/webm",
     });
 
-    console.log(`✅ Final video uploaded: ${destinationPath}`);
+    console.log(`✅ Final video uploaded to ${finalGCSPath}`);
     res.json({
       message: "Overlay complete",
-      videoUrl: `https://storage.googleapis.com/${bucketName}/${destinationPath}`,
+      videoUrl: `https://storage.googleapis.com/${SESSION_BUCKET}/${finalGCSPath}`,
     });
   } catch (err) {
-    console.error("❌ Error in /overlay:", err);
-    res.status(500).send("Overlay failed.");
+    console.error("❌ Overlay error:", err);
+    res.status(500).send("Failed to overlay audio.");
   }
 });
 
