@@ -613,6 +613,8 @@ app.post("/overlay", upload.none(), async (req, res) => {
     const filterParts = [];
     const mixInputs = [];
 
+    mixInputs.push(`[0:a]`);
+
     audioFiles.forEach((file, i) => {
       ffmpegInputs.push(`-i "${file.path}"`);
       const label = `a${i}`;
