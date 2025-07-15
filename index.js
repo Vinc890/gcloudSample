@@ -488,7 +488,7 @@ const util = require("util");
 const execPromise = util.promisify(require("child_process").exec);
 const cors = require("cors");
 const { TextToSpeechClient } = require("@google-cloud/text-to-speech");
-
+const PORT = 3000;
 const app = express();
 app.use(express.json());
 app.use(cors());
@@ -593,4 +593,7 @@ app.post("/upload-and-overlay", upload.array("chunks"), async (req, res) => {
   res.json({ finalVideoPath: `gs://${SESSION_BUCKET}/${finalGcs}` });
 });
 
-module.exports = app;
+
+app.listen(PORT, () => {
+  console.log(`🚀 Server listening on port ${PORT}`);
+});
