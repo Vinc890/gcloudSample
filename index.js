@@ -519,20 +519,28 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
   const chunkPath = path.join(chunkDir, `chunk_${index}`);
   fs.writeFileSync(chunkPath, req.file.buffer);
 
-  const receivedChunks = fs.readdirSync(chunkDir).filter(f => f.startsWith("chunk_")).length;
-  console.log(`Received chunk ${index}. Total received: ${receivedChunks}/${totalChunks}`);
+  const receivedChunks = fs
+    .readdirSync(chunkDir)
+    .filter(f => /^chunk_\d+$/.test(f)).length;
+
+  console.log(`📦 Received chunk ${index}. Total received: ${receivedChunks}/${totalChunks}`);
 
   if (receivedChunks == totalChunks) {
     const concatFile = path.join(chunkDir, "concat_list.txt");
+
     const chunkFiles = fs
       .readdirSync(chunkDir)
-      .filter(f => f.startsWith("chunk_"))
+      .filter(f => /^chunk_\d+$/.test(f))
       .sort((a, b) => parseInt(a.split("_")[1]) - parseInt(b.split("_")[1]));
 
-    const concatContent = chunkFiles.map(f => `file '${path.join(chunkDir, f)}'`).join("\n");
+    const concatContent = chunkFiles
+      .map(f => `file '${path.join(chunkDir, f)}'`)
+      .join("\n");
+
     fs.writeFileSync(concatFile, concatContent);
 
     const outputVideo = path.join(chunkDir, "merged.webm");
+
     await execPromise(`ffmpeg -f concat -safe 0 -i "${concatFile}" -c copy "${outputVideo}"`);
 
     const gcsPath = `${ROOT_FOLDER}/${sessionId}/Video/merged.webm`;
@@ -542,6 +550,7 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
     });
 
     console.log(`✅ Video assembled and uploaded to: gs://${SESSION_BUCKET}/${gcsPath}`);
+
     return res.status(200).json({
       message: "All chunks uploaded and video assembled.",
       videoPath: `gs://${SESSION_BUCKET}/${gcsPath}`,
@@ -551,6 +560,7 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
 
   res.status(200).send("Chunk received");
 });
+
 
 // TTS Generation
 
@@ -590,6 +600,7 @@ app.post("/tts", upload.none(), async (req, res) => {
 
 app.post("/overlay", upload.none(), async (req, res) => {
   const { sessionId, baseTimestamp } = req.body;
+
   if (!sessionId || !baseTimestamp) {
     return res.status(400).send("Missing sessionId or baseTimestamp");
   }
@@ -609,38 +620,48 @@ app.post("/overlay", upload.none(), async (req, res) => {
     .getFiles({ prefix: `${ROOT_FOLDER}/${sessionId}/Audio/` });
 
   const audioFiles = [];
+
   for (let file of files) {
     const filename = path.basename(file.name);
     const match = filename.match(/^tts_(\d+)_/);
     if (!match) continue;
 
-    const timestamp = parseInt(match[1]) - parseInt(baseTimestamp);
+    const ttsTime = parseInt(match[1]); // in ms
+    const delay = Math.max(0, ttsTime - parseInt(baseTimestamp));
+
     const localPath = path.join(sessionFolder, filename);
     await file.download({ destination: localPath });
-    audioFiles.push({ localPath, delay: timestamp });
+
+    console.log(`📢 Found TTS: ${filename} — delay: ${delay}ms`);
+    audioFiles.push({ localPath, delay });
+  }
+
+  if (audioFiles.length === 0) {
+    return res.status(400).send("No valid TTS files found for overlay.");
   }
 
   const inputArgs = [`-i "${localMergedPath}"`];
   const filters = [];
-  const amixInputs = [];
+  const delayedLabels = [];
 
   audioFiles.forEach((file, i) => {
     inputArgs.push(`-i "${file.localPath}"`);
-    filters.push(`[${i + 1}:a]adelay=${file.delay}|${file.delay}[a${i}]`);
-    amixInputs.push(`[a${i}]`);
+    const label = `a${i}`;
+    filters.push(`[${i + 1}:a]adelay=${file.delay}|${file.delay}[${label}]`);
+    delayedLabels.push(`[${label}]`);
   });
 
-  filters.push(`${amixInputs.join("")}amix=inputs=${audioFiles.length}[mixed]`);
-  filters.push(`[0:a][mixed]amix=inputs=2[aout]`);
+  filters.push(`${delayedLabels.join("")}amix=inputs=${delayedLabels.length}[mixed]`);
 
   const finalOutputPath = path.join(sessionFolder, `final_${Date.now()}.webm`);
   const ffmpegCmd = [
     ...inputArgs,
     `-filter_complex "${filters.join(";")}"`,
-    `-map 0:v -map "[aout]" -c:v copy -c:a libvorbis`,
+    `-map 0:v -map "[mixed]" -c:v copy -c:a libvorbis`,
     `"${finalOutputPath}"`,
   ].join(" ");
 
+  console.log(`🎬 Running ffmpeg:\n${ffmpegCmd}`);
   await execPromise(`/usr/bin/ffmpeg ${ffmpegCmd}`);
 
   const finalGCSPath = `${ROOT_FOLDER}/${sessionId}/Final/${path.basename(finalOutputPath)}`;
@@ -649,11 +670,14 @@ app.post("/overlay", upload.none(), async (req, res) => {
     contentType: "video/webm",
   });
 
+  console.log(`✅ Final video uploaded: gs://${SESSION_BUCKET}/${finalGCSPath}`);
+
   res.json({
     message: "✅ Final video generated and uploaded.",
     videoUrl: `https://storage.googleapis.com/${SESSION_BUCKET}/${finalGCSPath}`,
   });
 });
+
 
 
 app.listen(PORT, () => {
