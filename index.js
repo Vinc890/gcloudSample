@@ -572,19 +572,11 @@ app.post("/overlay", upload.none(), async (req, res) => {
       return res.status(400).send("Missing sessionId or baseTimestamp");
     }
 
-    const [sessionFiles] = await storage
-      .bucket(SESSION_BUCKET)
-      .getFiles({ prefix: `${ROOT_FOLDER}/${sessionId}/` });
-
-    await Promise.all(
-      sessionFiles
-        .filter((file) => !file.name.includes("/Final/"))
-        .map((file) => file.delete())
-    );
-
-    console.log(`🧹 Cleaned up old session files for: ${sessionId}`);
-
     const sessionFolder = path.join(TMP, ROOT_FOLDER, sessionId);
+
+    if (fs.existsSync(sessionFolder)) {
+      fs.rmSync(sessionFolder, { recursive: true, force: true });
+    }
     fs.mkdirSync(sessionFolder, { recursive: true });
 
     const videoGCSPath = `${ROOT_FOLDER}/${sessionId}/Video/merged.webm`;
