@@ -462,7 +462,6 @@ const ROOT_FOLDER = "sessions";
 const storage = new Storage();
 const ttsClient = new TextToSpeechClient();
 
-// Upload Video Chunks & Merge
 
 app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
   const { index, totalChunks, sessionId } = req.body;
@@ -592,8 +591,6 @@ app.post("/streamChunkUpload", upload.single("chunk"), async (req, res) => {
   }
 });
 
-// TTS Generation
-
 app.post("/tts", upload.none(), async (req, res) => {
   const { sessionId, startTimestamp, text } = req.body;
   if (!sessionId || !startTimestamp || !text) {
@@ -625,8 +622,6 @@ app.post("/tts", upload.none(), async (req, res) => {
     filename,
   });
 });
-
-// Overlay Audio on Final Video
 
 app.post("/overlay", upload.none(), async (req, res) => {
   try {
@@ -739,6 +734,136 @@ app.post("/overlay", upload.none(), async (req, res) => {
   } catch (err) {
     console.error("❌ Overlay error:", err);
     res.status(500).send("Failed to overlay audio.");
+  }
+});
+
+app.post("/overlay2", upload.none(), async (req, res) => {
+  try {
+    const {
+      sessionId,
+      baseTimestamp,
+      email,
+      firstName,
+      lastName,
+      testName,
+      attemptNo,
+    } = req.body;
+
+    if (!sessionId || !baseTimestamp) {
+      return res.status(400).send("Missing sessionId or baseTimestamp");
+    }
+
+    const sessionFolder = path.join(TMP, ROOT_FOLDER, sessionId);
+    fs.rmSync(sessionFolder, { recursive: true, force: true });
+    fs.mkdirSync(sessionFolder, { recursive: true });
+
+    const videoGCSPath = `${ROOT_FOLDER}/${sessionId}/Video/merged.webm`;
+    const localVideoPath = path.join(sessionFolder, "merged.webm");
+
+    await storage.bucket(SESSION_BUCKET).file(videoGCSPath).download({
+      destination: localVideoPath,
+    });
+
+    const [files] = await storage
+      .bucket(SESSION_BUCKET)
+      .getFiles({ prefix: `${ROOT_FOLDER}/${sessionId}/Audio/` });
+
+    const audioFiles = [];
+    for (const file of files) {
+      const filename = path.basename(file.name);
+      const match = filename.match(/^tts_\d+_(\d+)\.mp3$/);
+      if (!match) continue;
+
+      const timestamp = parseInt(match[1]);
+      const delay = Math.max(0, timestamp - parseInt(baseTimestamp));
+      const localPath = path.join(sessionFolder, filename);
+
+      await file.download({ destination: localPath });
+      audioFiles.push({ path: localPath, delay });
+    }
+
+    if (audioFiles.length === 0) {
+      return res.status(400).send("No valid TTS audio files found.");
+    }
+
+    const ffmpegInputs = [`-i "${localVideoPath}"`];
+    const filterParts = [];
+    const mixInputs = [`[0:a]`];
+
+    audioFiles.forEach((file, i) => {
+      ffmpegInputs.push(`-i "${file.path}"`);
+      const label = `a${i}`;
+      filterParts.push(
+        `[${i + 1}:a]adelay=${file.delay}|${file.delay}[${label}]`
+      );
+      mixInputs.push(`[${label}]`);
+    });
+
+    filterParts.push(
+      `${mixInputs.join("")}amix=inputs=${mixInputs.length}[aout]`
+    );
+
+    const finalOutputName = `final_${Date.now()}.webm`;
+    const finalOutputPath = path.join(sessionFolder, finalOutputName);
+
+    const ffmpegCommand = [
+      ...ffmpegInputs,
+      `-filter_complex "${filterParts.join(";")}"`,
+      `-map 0:v -map "[aout]" -c:v copy -c:a libopus -shortest`,
+      `"${finalOutputPath}"`,
+    ].join(" ");
+
+    console.log("🎬 Executing ffmpeg overlay...");
+    await execPromise(`/usr/bin/ffmpeg ${ffmpegCommand}`);
+
+    const finalGCSPath = `${ROOT_FOLDER}/${sessionId}/${finalOutputName}`;
+    await storage.bucket(SESSION_BUCKET).upload(finalOutputPath, {
+      destination: finalGCSPath,
+      contentType: "video/webm",
+    });
+
+    console.log(`✅ Final video uploaded to ${finalGCSPath}`);
+
+    const params = new URLSearchParams({
+      email,
+      firstName,
+      lastName,
+      testName,
+      attempt: attemptNo,
+      companyId: "LTI",
+      videoPath: finalOutputPath,
+    });
+
+    try {
+      const submitResponse = await fetch(
+        `https://myac.ai:99/submit-video?${params.toString()}`,
+        { method: "POST" }
+      );
+      const result = await submitResponse.json();
+      console.log("📤 Submission result:", result);
+    } catch (submitError) {
+      console.error("❌ Submission failed:", submitError);
+      res.status(500).send("Submission failed.");
+    }
+
+    await Promise.all([
+      storage.bucket(SESSION_BUCKET).deleteFiles({
+        prefix: `${ROOT_FOLDER}/${sessionId}/Audio/`,
+      }),
+      storage.bucket(SESSION_BUCKET).deleteFiles({
+        prefix: `${ROOT_FOLDER}/${sessionId}/Video/`,
+      }),
+    ]);
+
+    fs.rmSync(sessionFolder, { recursive: true, force: true });
+
+    res.json({
+      message: "Overlay complete and video submitted.",
+      videoUrl: `https://storage.googleapis.com/${SESSION_BUCKET}/${finalGCSPath}`,
+    });
+  } catch (err) {
+    console.error("❌ Overlay error:", err);
+    res.status(500).send("Failed to overlay and submit video.");
   }
 });
 
