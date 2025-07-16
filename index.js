@@ -1,5 +1,4 @@
 const express = require("express");
-require("dotenv").config();
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
@@ -10,7 +9,6 @@ const execPromise = util.promisify(require("child_process").exec);
 const cors = require("cors");
 
 const axios = require("axios");
-const { GoogleAuth } = require("google-auth-library");
 
 const PORT = 3000;
 
@@ -27,28 +25,6 @@ const ROOT_FOLDER = "sessions";
 
 const storage = new Storage();
 const ttsClient = new TextToSpeechClient();
-
-app.get("/generate-token", async (req, res) => {
-  try {
-    const SCOPES = ["https://www.googleapis.com/auth/cloud-platform"];
-
-    const auth = new GoogleAuth({
-      credentials: JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS),
-      scopes: SCOPES,
-    });
-
-    const client = await auth.getClient();
-    const accessTokenResponse = await client.getAccessToken();
-
-    res.json({
-      access_token: accessTokenResponse.token,
-      expires_in: 3600,
-    });
-  } catch (error) {
-    console.error("Error generating access token:", error);
-    res.status(500).json({ error: "Failed to generate access token" });
-  }
-});
 
 app.post("/transcribe-audio", upload.single("audio"), async (req, res) => {
   const token = req.headers.authorization?.split(" ")[1];
@@ -78,8 +54,8 @@ app.post("/transcribe-audio", upload.single("audio"), async (req, res) => {
     // };
     const requestBody = {
       config: {
-        encoding: "MP3", // <-- updated for MP3
-        sampleRateHertz: 44100, // common sample rate for MP3
+        encoding: "WEBM_OPUS",
+        sampleRateHertz: 48000,
         languageCode: "en-US",
       },
       audio: {
