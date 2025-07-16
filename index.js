@@ -40,18 +40,8 @@ app.post("/transcribe-audio", upload.single("audio"), async (req, res) => {
   }
 
   try {
-    const audioBytes = fs.readFileSync(req.file.path).toString("base64");
+    const audioBytes = req.file.buffer.toString("base64");
 
-    // const requestBody = {
-    //   config: {
-    //     encoding: 'LINEAR16',
-    //     sampleRateHertz: 16000,
-    //     languageCode: 'en-US'
-    //   },
-    //   audio: {
-    //     content: audioBytes
-    //   }
-    // };
     const requestBody = {
       config: {
         encoding: "WEBM_OPUS",
@@ -62,6 +52,7 @@ app.post("/transcribe-audio", upload.single("audio"), async (req, res) => {
         content: audioBytes,
       },
     };
+
     const response = await axios.post(
       "https://speech.googleapis.com/v1/speech:recognize",
       requestBody,
@@ -84,10 +75,9 @@ app.post("/transcribe-audio", upload.single("audio"), async (req, res) => {
       error.response?.data || error.message
     );
     res.status(500).json({ error: "Failed to transcribe audio" });
-  } finally {
-    fs.unlink(req.file.path, () => {});
   }
 });
+
 
 app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
   const { index, totalChunks, sessionId } = req.body;
