@@ -1,443 +1,5 @@
-// require("dotenv").config();
 // const express = require("express");
-// const app = express();
-// const PORT = 3000;
-// const { spawn } = require("child_process");
-// const path = require("path");
-// const fs = require("fs");
-// const { Storage } = require("@google-cloud/storage");
-// const { exec } = require("child_process");
-// const util = require("util");
-// const execPromise = util.promisify(exec);
-// const multer = require("multer");
-// const storage = new Storage();
-
-// app.get("/", (req, res) => {
-//   const ffmpeg = spawn("/usr/bin/ffmpeg", ["--help"]);
-
-//   ffmpeg.stdout.on("data", (data) => {
-//     console.log(`stdout: ${data}`);
-//   });
-
-//   ffmpeg.stderr.on("data", (data) => {
-//     console.error(`stderr: ${data}`);
-//   });
-
-//   ffmpeg.on("close", (code) => {
-//     console.log(`FFmpeg exited with code ${code}`);
-//     callback(code === 0 ? null : new Error("Conversion failed"));
-//   });
-
-//   res.send("Hello World");
-// });
-
-// app.post("/overlay-audio", async (req, res) => {
-//   try {
-//     const bucketName = "zimulate";
-//     const folder = "GoogleFunctions";
-//     const videoFileName = "vv1.webm";
-//     const audioFiles = [
-//       { name: "tt1.mp3", delay: 20 },
-//       { name: "tt2.mp3", delay: 30 },
-//       { name: "tt3.mp3", delay: 30 },
-//     ];
-
-//     const localDir = path.join(__dirname, "tmp");
-//     if (!fs.existsSync(localDir)) fs.mkdirSync(localDir);
-
-//     const downloadFile = async (fileName) => {
-//       const localPath = path.join(localDir, fileName);
-//       const file = storage.bucket(bucketName).file(`${folder}/${fileName}`);
-//       await file.download({ destination: localPath });
-//       return localPath;
-//     };
-
-//     // Download video and audio files
-//     const videoPath = await downloadFile(videoFileName);
-//     const audioPaths = await Promise.all(
-//       audioFiles.map((f) => downloadFile(f.name))
-//     );
-
-//     // Construct ffmpeg input arguments
-//     const ffmpegInputs = [`-i "${videoPath}"`];
-//     const filterParts = [];
-//     const mixInputs = [];
-
-//     audioPaths.forEach((audioPath, index) => {
-//       ffmpegInputs.push(`-i "${audioPath}"`);
-//       const delay = audioFiles[index].delay * 1000;
-//       const label = `a${index}`;
-//       filterParts.push(`[${index + 1}:a]adelay=${delay}|${delay}[${label}]`);
-//       mixInputs.push(`[${label}]`);
-//     });
-
-//     filterParts.push(
-//       `${mixInputs.join("")}amix=inputs=${audioPaths.length}[mixed]`
-//     );
-//     filterParts.push(`[0:a][mixed]amix=inputs=2[aout]`);
-
-//     const outputFileName = `output_${Date.now()}.webm`;
-//     const outputPath = path.join(localDir, outputFileName);
-
-//     const ffmpegCommand = [
-//       ...ffmpegInputs,
-//       `-filter_complex "${filterParts.join(";")}"`,
-//       `-map 0:v -map "[aout]" -c:v copy -c:a libvorbis `,
-//       `"${outputPath}"`,
-//     ].join(" ");
-
-//     console.log(" Running ffmpeg...");
-
-//     await execPromise(`/usr/bin/ffmpeg ${ffmpegCommand}`);
-
-//     const destinationPath = `${folder}/${outputFileName}`;
-//     await storage.bucket(bucketName).upload(outputPath, {
-//       destination: destinationPath,
-//       contentType: "video/mp4",
-//     });
-
-//     console.log(`✅ Uploaded to GCS: ${destinationPath}`);
-//     res.json({ outputUrl: `gs://${bucketName}/${destinationPath}` });
-
-//     // Cleanup
-//     [videoPath, ...audioPaths, outputPath].forEach((filePath) => {
-//       fs.unlinkSync(filePath);
-//     });
-//   } catch (err) {
-//     console.error("❌ Error in /overlay-audio:", err);
-//     res.status(500).send(`Overlay failed.${err}`);
-//   }
-// });
-
-// const upload = multer({ storage: multer.memoryStorage() });
-
-// app.post("/uploadChunks", upload.any(), async (req, res) => {
-//   try {
-//     const files = req.files;
-//     if (!files || files.length === 0) {
-//       return res.status(400).send("No chunks received");
-//     }
-
-//     const sortedChunks = files
-//       .filter(f => f.fieldname.startsWith("chunk-"))
-//       .sort((a, b) => {
-//         const aIndex = parseInt(a.fieldname.split("-")[1]);
-//         const bIndex = parseInt(b.fieldname.split("-")[1]);
-//         return aIndex - bIndex;
-//       });
-
-//     const localDir = path.join(__dirname, "tmp");
-//     if (!fs.existsSync(localDir)) fs.mkdirSync(localDir);
-
-//     const outputPath = path.join(localDir, "vv1.webm");
-//     const writeStream = fs.createWriteStream(outputPath);
-
-//     for (const chunk of sortedChunks) {
-//       writeStream.write(chunk.buffer);
-//     }
-
-//     writeStream.end();
-
-//     writeStream.on("finish", async () => {
-//       try {
-//         const bucketName = "zimulate";
-//         const folder = "GoogleFunctions";
-//         const destinationPath = `${folder}/vv1.webm`;
-
-//         await storage.bucket(bucketName).upload(outputPath, {
-//           destination: destinationPath,
-//           contentType: "video/webm",
-//         });
-
-//         fs.unlinkSync(outputPath);
-
-//         console.log(`✅ Uploaded vv1.webm to GCS`);
-//         res.status(200).json({ message: "Upload complete", path: destinationPath });
-//       } catch (err) {
-//         console.error("❌ GCS Upload failed:", err);
-//         res.status(500).send("Upload to GCS failed");
-//       }
-//     });
-
-//     writeStream.on("error", (err) => {
-//       console.error("❌ File write error:", err);
-//       res.status(500).send("Failed to write video");
-//     });
-//   } catch (err) {
-//     console.error("❌ Error in /uploadChunks:", err);
-//     res.status(500).send("Unexpected server error");
-//   }
-// });
-
-// app.post("/upload-and-overlay", upload.any(), async (req, res) => {
-//   try {
-//     const files = req.files;
-//     if (!files || files.length === 0) {
-//       return res.status(400).send("No chunks received");
-//     }
-
-//     // Sort and reassemble chunks
-//     const sortedChunks = files
-//       .filter(f => f.fieldname.startsWith("chunk-"))
-//       .sort((a, b) => {
-//         const aIndex = parseInt(a.fieldname.split("-")[1]);
-//         const bIndex = parseInt(b.fieldname.split("-")[1]);
-//         return aIndex - bIndex;
-//       });
-
-//     const localDir = path.join(__dirname, "tmp");
-//     if (!fs.existsSync(localDir)) fs.mkdirSync(localDir);
-
-//     const tempInputPath = path.join(localDir, "vv1.webm");
-//     const writeStream = fs.createWriteStream(tempInputPath);
-
-//     for (const chunk of sortedChunks) {
-//       writeStream.write(chunk.buffer);
-//     }
-//     writeStream.end();
-
-//     writeStream.on("finish", async () => {
-//       try {
-//         const bucketName = "zimulate";
-//         const folder = "GoogleFunctions";
-//         const inputFileName = "vv1.webm";
-//         const inputGCSPath = `${folder}/${inputFileName}`;
-
-//         // Upload raw video to GCS
-//         await storage.bucket(bucketName).upload(tempInputPath, {
-//           destination: inputGCSPath,
-//           contentType: "video/webm",
-//         });
-
-//         console.log(`✅ Uploaded ${inputFileName} to GCS`);
-
-//         // Now: overlay audio on the uploaded video
-//         const audioFiles = [
-//           { name: "tt1.mp3", delay: 20 },
-//           { name: "tt2.mp3", delay: 30 },
-//           { name: "tt3.mp3", delay: 30 },
-//         ];
-
-//         const downloadFile = async (fileName) => {
-//           const localPath = path.join(localDir, fileName);
-//           const file = storage.bucket(bucketName).file(`${folder}/${fileName}`);
-//           await file.download({ destination: localPath });
-//           return localPath;
-//         };
-
-//         const videoPath = await downloadFile(inputFileName);
-//         const audioPaths = await Promise.all(
-//           audioFiles.map((f) => downloadFile(f.name))
-//         );
-
-//         // FFMPEG setup
-//         const ffmpegInputs = [`-i "${videoPath}"`];
-//         const filterParts = [];
-//         const mixInputs = [];
-
-//         audioPaths.forEach((audioPath, index) => {
-//           ffmpegInputs.push(`-i "${audioPath}"`);
-//           const delay = audioFiles[index].delay * 1000;
-//           const label = `a${index}`;
-//           filterParts.push(`[${index + 1}:a]adelay=${delay}|${delay}[${label}]`);
-//           mixInputs.push(`[${label}]`);
-//         });
-
-//         filterParts.push(`${mixInputs.join("")}amix=inputs=${audioPaths.length}[mixed]`);
-//         filterParts.push(`[0:a][mixed]amix=inputs=2[aout]`);
-
-//         const outputFileName = `output_${Date.now()}.webm`;
-//         const outputPath = path.join(localDir, outputFileName);
-
-//         const ffmpegCommand = [
-//           ...ffmpegInputs,
-//           `-filter_complex "${filterParts.join(";")}"`,
-//           `-map 0:v -map "[aout]" -c:v copy -c:a libvorbis `,
-//           `"${outputPath}"`,
-//         ].join(" ");
-
-//         console.log("▶️ Running ffmpeg...");
-//         await execPromise(`/usr/bin/ffmpeg ${ffmpegCommand}`);
-
-//         const outputGCSPath = `${folder}/${outputFileName}`;
-//         await storage.bucket(bucketName).upload(outputPath, {
-//           destination: outputGCSPath,
-//           contentType: "video/webm",
-//         });
-
-//         console.log(`✅ Final video uploaded: ${outputGCSPath}`);
-
-//         // Cleanup
-//         [tempInputPath, videoPath, ...audioPaths, outputPath].forEach((filePath) => {
-//           if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-//         });
-
-//         res.status(200).json({
-//           message: "Upload and overlay complete",
-//           videoUrl: `gs://${bucketName}/${outputGCSPath}`,
-//         });
-
-//       } catch (err) {
-//         console.error("❌ Processing failed:", err);
-//         res.status(500).send("Audio overlay or GCS upload failed.");
-//       }
-//     });
-
-//     writeStream.on("error", (err) => {
-//       console.error("❌ Chunk file write error:", err);
-//       res.status(500).send("Failed to write video file.");
-//     });
-
-//   } catch (err) {
-//     console.error("❌ Unexpected error in /upload-and-overlay:", err);
-//     res.status(500).send("Server error");
-//   }
-// });
-
-// app.listen(PORT, () => {
-//   console.log(`Server is running on http://localhost:${PORT}`);
-// });
-
-// -------------------------------------------------------------------------------------------------------
-
-// require("dotenv").config();
-// const express = require("express");
-// const app = express();
-// const PORT = 3000;
-// const path = require("path");
-// const fs = require("fs");
-// const { Storage } = require("@google-cloud/storage");
-// const { exec } = require("child_process");
-// const util = require("util");
-// const multer = require("multer");
-// const cors = require("cors");
-
-// const execPromise = util.promisify(exec);
-// const storage = new Storage();
-
-// app.use(cors());
-// app.use(express.json());
-
-// const chunkUpload = multer({ storage: multer.memoryStorage() });
-
-// app.post("/uploadChunk", chunkUpload.single("chunk"), (req, res) => {
-//   const { index, videoId } = req.body;
-//   const chunkDir = path.join(__dirname, "tmp/chunks", videoId);
-//   if (!fs.existsSync(chunkDir)) fs.mkdirSync(chunkDir, { recursive: true });
-
-//   const chunkPath = path.join(chunkDir, `chunk_${index}`);
-//   fs.writeFileSync(chunkPath, req.file.buffer);
-//   res.status(200).send("Chunk saved");
-// });
-
-// app.post("/finalizeUpload", async (req, res) => {
-//   const { videoId, audioOverlays } = req.body;
-
-//   const localDir = path.join(__dirname, "tmp");
-//   const chunkDir = path.join(localDir, "chunks", videoId);
-//   const assembledPath = path.join(localDir, "vv1.webm");
-
-//   try {
-//     const chunkFiles = fs.readdirSync(chunkDir).sort((a, b) => {
-//       const aIndex = parseInt(a.split("_")[1]);
-//       const bIndex = parseInt(b.split("_")[1]);
-//       return aIndex - bIndex;
-//     });
-
-//     const writeStream = fs.createWriteStream(assembledPath);
-//     for (const chunkFile of chunkFiles) {
-//       const data = fs.readFileSync(path.join(chunkDir, chunkFile));
-//       writeStream.write(data);
-//     }
-//     writeStream.end();
-
-//     await new Promise((resolve, reject) => {
-//       writeStream.on("finish", resolve);
-//       writeStream.on("error", reject);
-//     });
-
-//     const bucketName = "zimulate";
-//     const folder = "GoogleFunctions";
-//     const videoDest = `${folder}/vv1.webm`;
-
-//     await storage.bucket(bucketName).upload(assembledPath, {
-//       destination: videoDest,
-//       contentType: "video/webm",
-//     });
-
-//     console.log("✅ Uploaded vv1.webm to GCS");
-
-//     const downloadFile = async (fileName) => {
-//       const localPath = path.join(localDir, fileName);
-//       const file = storage.bucket(bucketName).file(`${folder}/${fileName}`);
-//       await file.download({ destination: localPath });
-//       return localPath;
-//     };
-
-//     const videoPath = assembledPath;
-//     const audioPaths = await Promise.all(
-//       audioOverlays.map((f) => downloadFile(f.file))
-//     );
-
-//     const ffmpegInputs = [`-i "${videoPath}"`];
-//     const filterParts = [];
-//     const mixInputs = [];
-
-//     audioPaths.forEach((audioPath, index) => {
-//       ffmpegInputs.push(`-i "${audioPath}"`);
-//       const delay = audioOverlays[index].start * 1000;
-//       const label = `a${index}`;
-//       filterParts.push(`[${index + 1}:a]adelay=${delay}|${delay}[${label}]`);
-//       mixInputs.push(`[${label}]`);
-//     });
-
-//     filterParts.push(
-//       `${mixInputs.join("")}amix=inputs=${audioPaths.length}[mixed]`
-//     );
-//     filterParts.push(`[0:a][mixed]amix=inputs=2[aout]`);
-
-//     const outputFileName = `output_${Date.now()}.webm`;
-//     const outputPath = path.join(localDir, outputFileName);
-
-//     const ffmpegCommand = [
-//       ...ffmpegInputs,
-//       `-filter_complex "${filterParts.join(";")}"`,
-//       `-map 0:v -map "[aout]" -c:v copy -c:a libvorbis`,
-//       `"${outputPath}"`,
-//     ].join(" ");
-
-//     console.log("Running ffmpeg...");
-//     await execPromise(`/usr/bin/ffmpeg ${ffmpegCommand}`);
-
-//     const outputDest = `${folder}/${outputFileName}`;
-//     await storage.bucket(bucketName).upload(outputPath, {
-//       destination: outputDest,
-//       contentType: "video/webm",
-//     });
-
-//     console.log(`✅ Final output uploaded to ${outputDest}`);
-//     res.json({
-//       message: "Overlay complete",
-//       outputUrl: `gs://${bucketName}/${outputDest}`,
-//     });
-
-//     fs.unlinkSync(outputPath);
-//     fs.unlinkSync(assembledPath);
-//     fs.rmSync(chunkDir, { recursive: true });
-//     audioPaths.forEach((p) => fs.unlinkSync(p));
-//   } catch (err) {
-//     console.error("❌ Finalize failed:", err);
-//     res.status(500).send("Failed to process video");
-//   }
-// });
-
-// app.listen(PORT, () => {
-//   console.log(`🚀 Server is running on http://localhost:${PORT}`);
-// });
-
-// -------------------------------------------------------------------------------------------------------
-
-const express = require("express");
+require("dotenv").config();
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
@@ -446,6 +8,10 @@ const { TextToSpeechClient } = require("@google-cloud/text-to-speech");
 const util = require("util");
 const execPromise = util.promisify(require("child_process").exec);
 const cors = require("cors");
+
+const axios = require("axios");
+const { GoogleAuth } = require("google-auth-library");
+
 const PORT = 3000;
 
 const app = express();
@@ -462,6 +28,72 @@ const ROOT_FOLDER = "sessions";
 const storage = new Storage();
 const ttsClient = new TextToSpeechClient();
 
+async function getAccessToken() {
+  const auth = new GoogleAuth({
+    keyFile: {
+      type: "service_account",
+      project_id: "contactaiassessments",
+      private_key_id: "238a6770ff60a2556e9aa80e4bf25049f7d00a01",
+      private_key:
+        "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCb1dSmL7txWvqW\n5C1rkrw2dqaGciTLdgj4YjJbzC0ZSU0UpbbqXkx51SyXKhiArB4H6TfK3sImDJqL\n/kZl8MvWlWCegoXOeiXtwhLxsD6xOCMwcIbSaeggCKH9q3M8MjR0+4G6w6pKykkU\nXLeToLjNzQOGe5rf9Igz4Z5CEcz8Ju+ZUgiSrVYbJTz0eDjvo57Dtfu6ro/AYS/5\nXnFKRts+4VerM3RCZsFRLhP7pjbL0ywYUW3Tl1k6RyOvA9cxoLXVGoX3Dz7nTCtF\nyYG4iKZ1wJLO6xngspFYGKYKWpnu8A8y3jPeSzP6INdPKkmSdYPaiZUhpbgy8mIb\nMjlbt9ZpAgMBAAECggEADquDEL/2k9W+OF0zn2hZWoEx7P8q0pKChqtr1TNz3WkG\nnhZ5kTeeWGvGflaCpv5M926vh2QP/9f45ovh4a/Y6JL4XQOpiAX8sxStht4SEMnZ\nmjJFpuI8bWOSqFgvCXAqewbAMC5CRjcjyQxvZbDgJNOTbOIO8t1IwyWOqeaWFviH\nqKRjb+H63TQ/tj4OX2DxElCa9js166/FOrBPR7Fk4GS2CG0w+d2Lhk1FFf+v42QE\nLLbxtUTKZg68HkrUQ983qzMi0t8ddH6Jf459HGCof8PmZr1SVFjRWbyiaLKyTu7p\n1apyJpchmMuE4w0ypl7WWucAto3yQZ9kycbW/TD1nwKBgQDXRZb5S4QeWGZmKe6+\nZJl6h/6ijGYNgqjnHLoeMdF9TS5Qxjhvlp8ucpi6eotFEvRcR5QigtSLIX+lUKMj\nc2UyQVcY2bFfys5dJeFad5trg9WIeBvpa6BvyjqYu1F8OuNSpaOXZ6Nk+vSC3rLX\n/sQv0qZvwOfUmMOoXbF7aBWntwKBgQC5UYJAIF39DyceOWYpgdXm73Erde/ezHk8\nv0hvugKHOByc1DUdUP0lyXNULo+8K5tBkBYN1SYoFXRE6yEMGOC48Ud7OPaJa7Rk\nNMdy4f85JKY3BdgrgzGOD1SoZrQtN4QFnr+rthFsyFAMjBkuP9U7ehX+HyyFaDI8\nS6MGsK8y3wKBgQDB948oQzXhTc++YCwhW227LUxv1EekBsX/sC+3QzY6S8/esixp\nx3LYnCMna4GPlJufhlNgoTe3wVBNeZH1QGW/WYaL+qLK6Gb3IUmjhUACKUC+/VJR\nCUv/Tl1r/uRWJo1ri5oSsyxTsZedT+IfowvM92ZGLa/2LEunqfxgcJGKkwKBgD1V\nJqCGldS9ARtVr+Qo3lxR/sh9feflEHL0c8rWayPJhF67NOEA/udUpuDDkDqczAOE\n5meplblKcHKmxwcz7JwI7rlvfti4VrmbZi81cLy+zmwDeSndf7ceh8w8QYF9kCo0\nAgeYeGfiW+vrKiJOagoHO+Qg+SEl/QpLlicOrs1NAoGAXjx5voRw2AiuGY2tohtM\nIG0O6ohFhHUFDyg0UZS1o4OMfpA0vMx/SXhLG09fnXGtAHD6cLqoHVUkTOxjNzDY\nLLLjL35+y0ixtqRXR9Rndh0hGaDroy0PT8r0piLmKHv2TxRkHMZSiUMvHOpoUibT\nyCEd9D9ogCvkpvghVSZataM=\n-----END PRIVATE KEY-----\n",
+      client_email:
+        "service-account-test@contactaiassessments.iam.gserviceaccount.com",
+      client_id: "113213039598146082674",
+      auth_uri: "https://accounts.google.com/o/oauth2/auth",
+      token_uri: "https://oauth2.googleapis.com/token",
+      auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
+      client_x509_cert_url:
+        "https://www.googleapis.com/robot/v1/metadata/x509/service-account-test%40contactaiassessments.iam.gserviceaccount.com",
+      universe_domain: "googleapis.com",
+    },
+    scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+  });
+  const client = await auth.getClient();
+  return await client.getAccessToken();
+}
+
+app.post("/transcribe", async (req, res) => {
+  const { audioContent } = req.body;
+
+  if (!audioContent) {
+    return res
+      .status(400)
+      .json({ error: "Missing audioContent in base64 format" });
+  }
+
+  try {
+    const token = await getAccessToken();
+
+    const payload = {
+      config: {
+        encoding: "LINEAR16",
+        sampleRateHertz: 16000,
+        languageCode: "en-US",
+      },
+      audio: {
+        content: audioContent,
+      },
+    };
+
+    const { data } = await axios.post(
+      "https://speech.googleapis.com/v1/speech:recognize",
+      payload,
+      {
+        headers: {
+          Authorization: `Bearer ${token.token}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    const transcript =
+      data.results?.map((r) => r.alternatives[0].transcript).join(" ") || "";
+    res.json({ transcript });
+  } catch (err) {
+    const message = err.response?.data || err.message;
+    res.status(500).json({ error: message });
+  }
+});
 
 app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
   const { index, totalChunks, sessionId } = req.body;
