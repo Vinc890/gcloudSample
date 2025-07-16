@@ -528,6 +528,70 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
   }
 });
 
+app.post("/streamChunkUpload", upload.single("chunk"), async (req, res) => {
+  const { index, sessionId, isFinal } = req.body;
+
+  if (!index || !sessionId || !req.file) {
+    return res.status(400).send("Missing required fields or file.");
+  }
+
+  const chunkDir = path.join(TMP, ROOT_FOLDER, sessionId, "chunks");
+  fs.mkdirSync(chunkDir, { recursive: true });
+
+  const chunkPath = path.join(chunkDir, `chunk_${index}`);
+  fs.writeFileSync(chunkPath, req.file.buffer);
+
+  console.log(`📥 Saved chunk ${index} for session ${sessionId}`);
+
+  if (isFinal === "true") {
+    console.log("✅ Final chunk received. Starting merge...");
+
+    try {
+      const chunkFiles = fs
+        .readdirSync(chunkDir)
+        .filter((f) => f.startsWith("chunk_"))
+        .sort((a, b) => parseInt(a.split("_")[1]) - parseInt(b.split("_")[1]));
+
+      const mergedPath = path.join(chunkDir, "merged.webm");
+      const writeStream = fs.createWriteStream(mergedPath);
+
+      for (const file of chunkFiles) {
+        const buffer = fs.readFileSync(path.join(chunkDir, file));
+        writeStream.write(buffer);
+      }
+
+      writeStream.end();
+
+      writeStream.on("finish", async () => {
+        const gcsPath = `${ROOT_FOLDER}/${sessionId}/Video/merged.webm`;
+        await storage.bucket(SESSION_BUCKET).upload(mergedPath, {
+          destination: gcsPath,
+          contentType: "video/webm",
+        });
+
+        console.log(
+          `🎥 Merged video uploaded to gs://${SESSION_BUCKET}/${gcsPath}`
+        );
+
+        return res.status(200).json({
+          message: "Final chunk received. Video merged and uploaded.",
+          videoUrl: `https://storage.googleapis.com/${SESSION_BUCKET}/${gcsPath}`,
+        });
+      });
+
+      writeStream.on("error", (err) => {
+        console.error("❌ Failed to merge chunks:", err);
+        res.status(500).send("Failed to merge chunks.");
+      });
+    } catch (mergeErr) {
+      console.error("❌ Merge error:", mergeErr);
+      res.status(500).send("Internal server error during merge.");
+    }
+  } else {
+    res.status(200).send("Chunk received");
+  }
+});
+
 // TTS Generation
 
 app.post("/tts", upload.none(), async (req, res) => {
