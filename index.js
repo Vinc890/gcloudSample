@@ -37,13 +37,11 @@ async function getAccessToken() {
   return await client.getAccessToken();
 }
 
-app.post("/transcribe", async (req, res) => {
+app.post('/transcribe', async (req, res) => {
   const { audioContent } = req.body;
 
-  if (!audioContent) {
-    return res
-      .status(400)
-      .json({ error: "Missing audioContent in base64 format" });
+  if (!audioContent || typeof audioContent !== 'string') {
+    return res.status(400).json({ error: 'audioContent must be a base64-encoded string' });
   }
 
   try {
@@ -51,9 +49,9 @@ app.post("/transcribe", async (req, res) => {
 
     const payload = {
       config: {
-        encoding: "LINEAR16",
+        encoding: 'LINEAR16',
         sampleRateHertz: 16000,
-        languageCode: "en-US",
+        languageCode: 'en-US',
       },
       audio: {
         content: audioContent,
@@ -61,24 +59,25 @@ app.post("/transcribe", async (req, res) => {
     };
 
     const { data } = await axios.post(
-      "https://speech.googleapis.com/v1/speech:recognize",
+      'https://speech.googleapis.com/v1/speech:recognize',
       payload,
       {
         headers: {
           Authorization: `Bearer ${token.token}`,
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
         },
       }
     );
 
-    const transcript =
-      data.results?.map((r) => r.alternatives[0].transcript).join(" ") || "";
+    const transcript = data.results?.map(r => r.alternatives[0].transcript).join(' ') || '';
     res.json({ transcript });
+
   } catch (err) {
     const message = err.response?.data || err.message;
     res.status(500).json({ error: message });
   }
 });
+
 
 app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
   const { index, totalChunks, sessionId } = req.body;
