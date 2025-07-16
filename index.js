@@ -28,53 +28,27 @@ const ROOT_FOLDER = "sessions";
 const storage = new Storage();
 const ttsClient = new TextToSpeechClient();
 
-async function getAccessToken() {
-  const auth = new GoogleAuth({
-    keyFile: process.env.GOOGLE_APPLICATION_CREDENTIALS,
-    scopes: ["https://www.googleapis.com/auth/cloud-platform"],
-  });
-  const client = await auth.getClient();
-  return await client.getAccessToken();
-}
-
-app.post('/transcribe', async (req, res) => {
-  const { audioContent } = req.body;
-
-  if (!audioContent || typeof audioContent !== 'string') {
-    return res.status(400).json({ error: 'audioContent must be a base64-encoded string' });
-  }
-
+app.get('/generate-token', async (req, res) => {
   try {
-    const token = await getAccessToken();
+    const SCOPES = [
+      'https://www.googleapis.com/auth/cloud-platform'
+    ];
 
-    const payload = {
-      config: {
-        encoding: 'LINEAR16',
-        sampleRateHertz: 16000,
-        languageCode: 'en-US',
-      },
-      audio: {
-        content: audioContent,
-      },
-    };
+    const auth = new GoogleAuth({
+      credentials: JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS),
+      scopes: SCOPES
+    });
 
-    const { data } = await axios.post(
-      'https://speech.googleapis.com/v1/speech:recognize',
-      payload,
-      {
-        headers: {
-          Authorization: `Bearer ${token.token}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
+    const client = await auth.getClient();
+    const accessTokenResponse = await client.getAccessToken();
 
-    const transcript = data.results?.map(r => r.alternatives[0].transcript).join(' ') || '';
-    res.json({ transcript });
-
-  } catch (err) {
-    const message = err.response?.data || err.message;
-    res.status(500).json({ error: message });
+    res.json({
+      access_token: accessTokenResponse.token,
+      expires_in: 3600
+    });
+  } catch (error) {
+    console.error('Error generating access token:', error);
+    res.status(500).json({ error: 'Failed to generate access token' });
   }
 });
 
