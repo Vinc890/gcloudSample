@@ -28,15 +28,13 @@ const ROOT_FOLDER = "sessions";
 const storage = new Storage();
 const ttsClient = new TextToSpeechClient();
 
-app.get('/generate-token', async (req, res) => {
+app.get("/generate-token", async (req, res) => {
   try {
-    const SCOPES = [
-      'https://www.googleapis.com/auth/cloud-platform'
-    ];
+    const SCOPES = ["https://www.googleapis.com/auth/cloud-platform"];
 
     const auth = new GoogleAuth({
       credentials: JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS),
-      scopes: SCOPES
+      scopes: SCOPES,
     });
 
     const client = await auth.getClient();
@@ -44,14 +42,76 @@ app.get('/generate-token', async (req, res) => {
 
     res.json({
       access_token: accessTokenResponse.token,
-      expires_in: 3600
+      expires_in: 3600,
     });
   } catch (error) {
-    console.error('Error generating access token:', error);
-    res.status(500).json({ error: 'Failed to generate access token' });
+    console.error("Error generating access token:", error);
+    res.status(500).json({ error: "Failed to generate access token" });
   }
 });
 
+app.post("/transcribe-audio", upload.single("audio"), async (req, res) => {
+  const token = req.headers.authorization?.split(" ")[1];
+
+  if (!token) {
+    return res
+      .status(401)
+      .json({ error: "Missing or invalid Authorization header" });
+  }
+
+  if (!req.file) {
+    return res.status(400).json({ error: "No audio file uploaded" });
+  }
+
+  try {
+    const audioBytes = fs.readFileSync(req.file.path).toString("base64");
+
+    // const requestBody = {
+    //   config: {
+    //     encoding: 'LINEAR16',
+    //     sampleRateHertz: 16000,
+    //     languageCode: 'en-US'
+    //   },
+    //   audio: {
+    //     content: audioBytes
+    //   }
+    // };
+    const requestBody = {
+      config: {
+        encoding: "MP3", // <-- updated for MP3
+        sampleRateHertz: 44100, // common sample rate for MP3
+        languageCode: "en-US",
+      },
+      audio: {
+        content: audioBytes,
+      },
+    };
+    const response = await axios.post(
+      "https://speech.googleapis.com/v1/speech:recognize",
+      requestBody,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    const transcription = response.data.results
+      ?.map((result) => result.alternatives[0].transcript)
+      .join("\n");
+
+    res.json({ transcription: transcription || "No transcription found" });
+  } catch (error) {
+    console.error(
+      "Speech-to-Text error:",
+      error.response?.data || error.message
+    );
+    res.status(500).json({ error: "Failed to transcribe audio" });
+  } finally {
+    fs.unlink(req.file.path, () => {});
+  }
+});
 
 app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
   const { index, totalChunks, sessionId } = req.body;
