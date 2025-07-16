@@ -1,3 +1,4 @@
+require("dotenv").config();
 const express = require("express");
 const multer = require("multer");
 const fs = require("fs");
@@ -7,15 +8,17 @@ const { TextToSpeechClient } = require("@google-cloud/text-to-speech");
 const util = require("util");
 const execPromise = util.promisify(require("child_process").exec);
 const cors = require("cors");
+const speech = require("@google-cloud/speech");
 
 const axios = require("axios");
 
-const PORT = 3000;
+const PORT = 3010;
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 app.use(cors());
-
+const client = new speech.SpeechClient();
 const upload = multer({ storage: multer.memoryStorage() });
 const chunkUpload = multer({ storage: multer.memoryStorage() });
 
@@ -26,7 +29,7 @@ const ROOT_FOLDER = "sessions";
 const storage = new Storage();
 const ttsClient = new TextToSpeechClient();
 
-app.post("/transcribe-audio", upload.single("audio"), async (req, res) => {
+app.post("/transcribe-audio", async (req, res) => {
   const token = req.headers.authorization?.split(" ")[1];
 
   if (!token) {
@@ -78,6 +81,41 @@ app.post("/transcribe-audio", upload.single("audio"), async (req, res) => {
   }
 });
 
+app.post("/transcribe-audio1", async (req, res) => {
+  try {
+    const audioBytes = req.body.base64;
+
+    const audio = {
+      content: audioBytes,
+    };
+
+    const config = {
+      encoding: "WEBM_OPUS", // or LINEAR16, MP3, FLAC, etc.
+      sampleRateHertz: 48000, // match your input file
+      languageCode: "en-US",
+    };
+
+    const request = {
+      audio,
+      config,
+    };
+
+    const [response] = await client.recognize(request);
+    const transcription = response.results
+      .map((result) => result.alternatives[0].transcript)
+      .join("\n");
+
+    // Clean up uploaded file
+    // fs.unlinkSync(filePath);
+
+    res.json({ transcription });
+  } catch (err) {
+    console.error(err);
+    res
+      .status(500)
+      .json({ error: "Transcription failed", details: err.message });
+  }
+});
 
 app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
   const { index, totalChunks, sessionId } = req.body;

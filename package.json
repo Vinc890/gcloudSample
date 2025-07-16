@@ -10,6 +10,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@google-cloud/speech": "^7.2.0",
     "@google-cloud/storage": "^7.16.0",
     "@google-cloud/text-to-speech": "^6.2.0",
     "axios": "^1.10.0",
