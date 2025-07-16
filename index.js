@@ -12,7 +12,7 @@ const speech = require("@google-cloud/speech");
 
 const axios = require("axios");
 
-const PORT = 3010;
+const PORT = 3000;
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
