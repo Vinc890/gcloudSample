@@ -396,11 +396,11 @@ app.post("/overlay2", upload.none(), async (req, res) => {
     const {
       sessionId,
       baseTimestamp,
-      email,
-      firstName,
-      lastName,
-      testName,
-      attemptNo,
+      // email,
+      // firstName,
+      // lastName,
+      // testName,
+      // attemptNo,
     } = req.body;
 
     if (!sessionId || !baseTimestamp) {
@@ -478,27 +478,27 @@ app.post("/overlay2", upload.none(), async (req, res) => {
 
     console.log(`✅ Final video uploaded to ${finalGCSPath}`);
 
-    const params = new URLSearchParams({
-      email,
-      firstName,
-      lastName,
-      testName,
-      attempt: attemptNo,
-      companyId: "LTI",
-      videoPath: finalOutputPath,
-    });
+    // const params = new URLSearchParams({
+    //   email,
+    //   firstName,
+    //   lastName,
+    //   testName,
+    //   attempt: attemptNo,
+    //   companyId: "LTI",
+    //   videoPath: finalOutputPath,
+    // });
 
-    try {
-      const submitResponse = await fetch(
-        `https://myac.ai:99/submit-video?${params.toString()}`,
-        { method: "POST" }
-      );
-      const result = await submitResponse.json();
-      console.log("📤 Submission result:", result);
-    } catch (submitError) {
-      console.error("❌ Submission failed:", submitError);
-      res.status(500).send("Submission failed.");
-    }
+    // try {
+    //   const submitResponse = await fetch(
+    //     `https://myac.ai:99/submit-video?${params.toString()}`,
+    //     { method: "POST" }
+    //   );
+    //   const result = await submitResponse.json();
+    //   console.log("📤 Submission result:", result);
+    // } catch (submitError) {
+    //   console.error("❌ Submission failed:", submitError);
+    //   res.status(500).send("Submission failed.");
+    // }
 
     await Promise.all([
       storage.bucket(SESSION_BUCKET).deleteFiles({
