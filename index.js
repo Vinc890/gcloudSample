@@ -517,7 +517,7 @@ app.post("/overlay2", upload.none(), async (req, res) => {
     });
   } catch (err) {
     console.error("❌ Overlay error:", err);
-    res.status(500).send("Failed to overlay and submit video.");
+    res.status(500).send(`Failed to overlay and submit video.${err}`);
   }
 });
 
