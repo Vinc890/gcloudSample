@@ -9,8 +9,11 @@ const util = require("util");
 const execPromise = util.promisify(require("child_process").exec);
 const cors = require("cors");
 const speech = require("@google-cloud/speech");
-
+const { google } = require("googleapis");
 const axios = require("axios");
+const { v4: uuidv4 } = require("uuid");
+const ffmpeg = require("fluent-ffmpeg");
+
 
 const PORT = 3000;
 
@@ -24,96 +27,254 @@ const chunkUpload = multer({ storage: multer.memoryStorage() });
 
 const TMP = "/tmp";
 const SESSION_BUCKET = "zimulate";
+const BUCKET_NAME = "zimulate";
 const ROOT_FOLDER = "sessions";
+const ELEVEN_API_KEY = "sk_b7ec21f390dd84e163725b4876fc9bb42a5e744d75e43f07";
 
 const storage = new Storage();
 const ttsClient = new TextToSpeechClient();
 
-app.post("/transcribe-audio", async (req, res) => {
-  const token = req.headers.authorization?.split(" ")[1];
+async function waitForAudio(
+  conversationId,
+  apiKey,
+  maxRetries = 10,
+  delayMs = 5000
+) {
+  console.log(`⏳ Waiting for audio for conversation ID: ${conversationId}`);
 
-  if (!token) {
-    return res
-      .status(401)
-      .json({ error: "Missing or invalid Authorization header" });
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const convoRes = await axios.get(
+        `https://api.elevenlabs.io/v1/convai/conversations/${conversationId}`,
+        { headers: { "xi-api-key": apiKey } }
+      );
+      const { message_count, status } = convoRes.data;
+      console.log(
+        `🔁 Attempt ${attempt}: status=${status}, message_count=${message_count}`
+      );
+
+      if (status === "done") {
+        try {
+          const audioRes = await axios.get(
+            `https://api.elevenlabs.io/v1/convai/conversations/${conversationId}/audio`,
+            {
+              headers: { "xi-api-key": apiKey },
+              responseType: "arraybuffer",
+            }
+          );
+          console.log("✅ Audio fetched successfully.");
+          return audioRes.data;
+        } catch (err) {
+          if (err.response?.status !== 404) throw err;
+          console.log("⚠️ Audio not ready yet (404). Will retry...");
+        }
+      }
+    } catch (err) {
+      console.error("❌ Error checking conversation status:", err.message);
+    }
+    await new Promise((res) => setTimeout(res, delayMs));
   }
 
-  if (!req.file) {
-    return res.status(400).json({ error: "No audio file uploaded" });
-  }
+  throw new Error("⏰ Timed out waiting for conversation audio.");
+}
+
+const getMediaDuration = (filePath) => {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(filePath, (err, metadata) => {
+      if (err) return reject(err);
+      resolve(metadata.format.duration);
+    });
+  });
+};
+
+function getCurrentDateFormatted() {
+  const today = new Date();
+
+  const day = String(today.getDate()).padStart(2, "0");
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const year = today.getFullYear();
+
+  return `${day}_${month}_${year}`;
+}
+
+app.post("/get-token1", async (req, res) => {
+  const { agentId, userId } = req.body;
+  console.log("[Backend] Request received:", { agentId, userId });
 
   try {
-    const audioBytes = req.file.buffer.toString("base64");
-
-    const requestBody = {
-      config: {
-        encoding: "WEBM_OPUS",
-        sampleRateHertz: 48000,
-        languageCode: "en-US",
-      },
-      audio: {
-        content: audioBytes,
-      },
-    };
-
-    const response = await axios.post(
-      "https://speech.googleapis.com/v1/speech:recognize",
-      requestBody,
+    const response = await fetch(
+      "https://api.elevenlabs.io/v1/convai/conversation/token",
       {
+        method: "POST",
         headers: {
-          Authorization: `Bearer ${token}`,
+          "xi-api-key": process.env.ELEVENLABS_API_KEY,
           "Content-Type": "application/json",
         },
+        body: JSON.stringify({ agent_id: agentId, user_id: userId }),
       }
     );
 
-    const transcription = response.data.results
-      ?.map((result) => result.alternatives[0].transcript)
-      .join("\n");
+    if (!response.ok) {
+      const error = await response.text();
+      console.error("[Backend] Error fetching token:", error);
+      return res.status(500).json({ error });
+    }
 
-    res.json({ transcription: transcription || "No transcription found" });
-  } catch (error) {
-    console.error(
-      "Speech-to-Text error:",
-      error.response?.data || error.message
-    );
-    res.status(500).json({ error: "Failed to transcribe audio" });
+    const data = await response.json();
+    console.log("[Backend] Token generated", data);
+    res.json({ token: data.token });
+  } catch (err) {
+    console.error("[Backend] Exception:", err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
-app.post("/transcribe-audio1", async (req, res) => {
+app.post("/upload-to-gcs", async (req, res) => {
+  console.log("upload-to-gcs ", req.body);
+
+  const {
+    companyId,
+    testName,
+    email,
+    attemptNo,
+    agentId,
+    sessionId,
+    videoUrl,
+  } = req.body;
+
   try {
-    const audioBytes = req.body.base64;
+    let mergedPath;
 
-    const audio = {
-      content: audioBytes,
-    };
+    if (videoUrl) {
+      console.log("🌐 Using merged video from URL:", videoUrl);
+      const tempDir = path.join(__dirname, "temp");
+      if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
 
-    const config = {
-      encoding: "WEBM_OPUS", // or LINEAR16, MP3, FLAC, etc.
-      sampleRateHertz: 48000, // match your input file
-      languageCode: "en-US",
-    };
+      mergedPath = path.join(tempDir, `merged-${sessionId}.webm`);
+      const response = await axios.get(videoUrl, {
+        responseType: "arraybuffer",
+      });
+      fs.writeFileSync(mergedPath, Buffer.from(response.data));
+      console.log("✅ Downloaded merged video locally:", mergedPath);
+    } else {
+      const chunkDir = path.join(TMP, ROOT_FOLDER, sessionId, "chunks");
+      mergedPath = path.join(chunkDir, "merged.webm");
 
-    const request = {
-      audio,
-      config,
-    };
+      if (!fs.existsSync(mergedPath)) {
+        console.error("❌ Merged video not found at:", mergedPath);
+        return res.status(404).json({ error: "Merged video not found." });
+      }
+      console.log("✅ Found merged video locally:", mergedPath);
+    }
 
-    const [response] = await client.recognize(request);
-    const transcription = response.results
-      .map((result) => result.alternatives[0].transcript)
-      .join("\n");
+    const tempDir = path.join(__dirname, "temp");
+    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
 
-    // Clean up uploaded file
-    // fs.unlinkSync(filePath);
+    const audioFileName = `audio-${uuidv4()}.mp3`;
+    const sanitizedEmail = email.replace(/[@.]/g, "_");
+    const finalFileName = `FinalVideo_${sanitizedEmail}_${attemptNo}.webm`;
 
-    res.json({ transcription });
+    const tempAudioPath = path.join(tempDir, audioFileName);
+    const tempMergedPath = path.join(tempDir, finalFileName);
+
+    const convoListRes = await axios.get(
+      "https://api.elevenlabs.io/v1/convai/conversations",
+      {
+        headers: { "xi-api-key": ELEVEN_API_KEY },
+        params: { agent_id: agentId },
+      }
+    );
+
+    const conversationId =
+      convoListRes.data?.conversations?.[0]?.conversation_id;
+    if (!conversationId) throw new Error("No conversation found.");
+
+    console.log(" Using conversation ID:", conversationId);
+
+    const audioBuffer = await waitForAudio(conversationId, ELEVEN_API_KEY);
+    fs.writeFileSync(tempAudioPath, audioBuffer);
+    console.log("✅ Audio saved at:", tempAudioPath);
+
+    const videoDuration = await getMediaDuration(mergedPath);
+    const audioDuration = await getMediaDuration(tempAudioPath);
+    // const offset = Math.max(videoDuration - audioDuration, 0).toFixed(2);
+    const offset = 2;
+
+    console.log(` Video duration: ${videoDuration}s`);
+    console.log(` Audio duration: ${audioDuration}s`);
+    console.log(` Trimming first ${offset}s from video...`);
+
+    await new Promise((resolve, reject) => {
+      ffmpeg()
+        .input(mergedPath)
+        // .setStartTime(offset)
+        .input(tempAudioPath)
+        // .complexFilter(["[0:a][1:a]amix=inputs=2:duration=shortest[aout]"])
+        .outputOptions([
+          "-map 0:v:0",
+          "-map 1:a:0",
+          "-c:v libvpx",
+          "-c:a libvorbis",
+          "-shortest",
+        ])
+        .on("end", () => {
+          console.log("✅ Trimmed and merged video+audio.");
+          resolve();
+        })
+        .on("error", (err) => {
+          console.error("❌ ffmpeg error:", err.message);
+          reject(err);
+        })
+        .save(tempMergedPath);
+    });
+
+    const gcsPath = `${companyId}/${testName}/${email}/${attemptNo}/${getCurrentDateFormatted()}/${finalFileName}`;
+    console.log(" Uploading to GCS at:", gcsPath);
+
+    await storage.bucket(BUCKET_NAME).upload(tempMergedPath, {
+      destination: gcsPath,
+      metadata: { contentType: "video/webm" },
+    });
+
+    console.log(" Final video uploaded to GCS.");
+
+    const finalVideoUrl = `https://storage.googleapis.com/${BUCKET_NAME}/${gcsPath}`;
+
+    [tempAudioPath, tempMergedPath, mergedPath].forEach((file) => {
+      if (fs.existsSync(file)) {
+        fs.unlinkSync(file);
+        console.log(` Deleted temp file: ${file}`);
+      }
+    });
+
+    try {
+      await axios.delete(
+        `https://api.elevenlabs.io/v1/convai/conversations/${conversationId}`,
+        {
+          headers: { "xi-api-key": ELEVEN_API_KEY },
+        }
+      );
+      console.log(`🗑️ Deleted conversation: ${conversationId}`);
+
+      await axios.delete(
+        `https://api.elevenlabs.io/v1/convai/agents/${agentId}`,
+        {
+          headers: { "xi-api-key": ELEVEN_API_KEY },
+        }
+      );
+      console.log(`🗑️ Deleted agent: ${agentId}`);
+    } catch (err) {
+      console.error("⚠️ Failed to clean up agent/conversation:", err.message);
+    }
+
+    res.json({
+      success: true,
+      gcsPath,
+      videoUrl: finalVideoUrl,
+    });
   } catch (err) {
-    console.error(err);
-    res
-      .status(500)
-      .json({ error: "Transcription failed", details: err.message });
+    console.error("❌ Error in upload-to-gcs handler:", err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -181,343 +342,48 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
   }
 });
 
-app.post("/streamChunkUpload", upload.single("chunk"), async (req, res) => {
-  const { index, sessionId, isFinal } = req.body;
 
-  if (!index || !sessionId || !req.file) {
-    return res.status(400).send("Missing required fields or file.");
-  }
 
-  const chunkDir = path.join(TMP, ROOT_FOLDER, sessionId, "chunks");
-  fs.mkdirSync(chunkDir, { recursive: true });
+const SCOPES = ["https://www.googleapis.com/auth/gmail.send"];
 
-  const chunkPath = path.join(chunkDir, `chunk_${index}`);
-  fs.writeFileSync(chunkPath, req.file.buffer);
-
-  console.log(`📥 Saved chunk ${index} for session ${sessionId}`);
-
-  if (isFinal === "true") {
-    console.log("✅ Final chunk received. Starting merge...");
-
-    try {
-      const chunkFiles = fs
-        .readdirSync(chunkDir)
-        .filter((f) => f.startsWith("chunk_"))
-        .sort((a, b) => parseInt(a.split("_")[1]) - parseInt(b.split("_")[1]));
-
-      const mergedPath = path.join(chunkDir, "merged.webm");
-      const writeStream = fs.createWriteStream(mergedPath);
-
-      for (const file of chunkFiles) {
-        const buffer = fs.readFileSync(path.join(chunkDir, file));
-        writeStream.write(buffer);
-      }
-
-      writeStream.end();
-
-      writeStream.on("finish", async () => {
-        const gcsPath = `${ROOT_FOLDER}/${sessionId}/Video/merged.webm`;
-        await storage.bucket(SESSION_BUCKET).upload(mergedPath, {
-          destination: gcsPath,
-          contentType: "video/webm",
-        });
-
-        console.log(
-          `🎥 Merged video uploaded to gs://${SESSION_BUCKET}/${gcsPath}`
-        );
-
-        return res.status(200).json({
-          message: "Final chunk received. Video merged and uploaded.",
-          videoUrl: `https://storage.googleapis.com/${SESSION_BUCKET}/${gcsPath}`,
-        });
-      });
-
-      writeStream.on("error", (err) => {
-        console.error("❌ Failed to merge chunks:", err);
-        res.status(500).send("Failed to merge chunks.");
-      });
-    } catch (mergeErr) {
-      console.error("❌ Merge error:", mergeErr);
-      res.status(500).send("Internal server error during merge.");
-    }
-  } else {
-    res.status(200).send("Chunk received");
-  }
+const auth = new google.auth.GoogleAuth({
+  keyFile: "speech-to-text-key.json",
+  scopes: SCOPES,
 });
 
-app.post("/tts", upload.none(), async (req, res) => {
-  const { sessionId, startTimestamp, text } = req.body;
-  if (!sessionId || !startTimestamp || !text) {
-    return res.status(400).send("Missing sessionId, startTimestamp, or text");
-  }
-
-  const sessionFolder = `${ROOT_FOLDER}/${sessionId}`;
-  const filename = `tts_${startTimestamp}_${Date.now()}.mp3`;
-  const localPath = path.join(TMP, filename);
-
-  const [response] = await ttsClient.synthesizeSpeech({
-    input: { text },
-    voice: { languageCode: "en-US", name: "en-US-Wavenet-D" },
-    audioConfig: { audioEncoding: "MP3" },
-  });
-
-  fs.writeFileSync(localPath, response.audioContent, "binary");
-
-  const gcsPath = `${sessionFolder}/Audio/${filename}`;
-  await storage.bucket(SESSION_BUCKET).upload(localPath, {
-    destination: gcsPath,
-    contentType: "audio/mp3",
-  });
-
-  fs.unlinkSync(localPath);
-  res.json({
-    audioPath: `gs://${SESSION_BUCKET}/${gcsPath}`,
-    gcsUrl: `https://storage.googleapis.com/${SESSION_BUCKET}/${gcsPath}`,
-    filename,
-  });
-});
-
-app.post("/overlay", upload.none(), async (req, res) => {
+app.post("/send-email", async (req, res) => {
   try {
-    const { sessionId, baseTimestamp } = req.body;
+    const { name, email, message } = req.body;
+    const client = await auth.getClient();
+    const gmail = google.gmail({ version: "v1", auth: client });
 
-    if (!sessionId || !baseTimestamp) {
-      return res.status(400).send("Missing sessionId or baseTimestamp");
-    }
+    const rawMessage = [
+      `To: contact@thev2technologies.com`,
+      `Subject: New Contact Form Submission`,
+      'Content-Type: text/plain; charset="UTF-8"',
+      "",
+      `Name: ${name}`,
+      `Email: ${email}`,
+      `Message: ${message}`,
+    ].join("\n");
 
-    const sessionFolder = path.join(TMP, ROOT_FOLDER, sessionId);
+    const encodedMessage = Buffer.from(rawMessage)
+      .toString("base64")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
 
-    if (fs.existsSync(sessionFolder)) {
-      fs.rmSync(sessionFolder, { recursive: true, force: true });
-    }
-    fs.mkdirSync(sessionFolder, { recursive: true });
-
-    const videoGCSPath = `${ROOT_FOLDER}/${sessionId}/Video/merged.webm`;
-    const localVideoPath = path.join(sessionFolder, "merged.webm");
-
-    await storage.bucket(SESSION_BUCKET).file(videoGCSPath).download({
-      destination: localVideoPath,
+    await gmail.users.messages.send({
+      userId: "me",
+      requestBody: {
+        raw: encodedMessage,
+      },
     });
 
-    const [files] = await storage
-      .bucket(SESSION_BUCKET)
-      .getFiles({ prefix: `${ROOT_FOLDER}/${sessionId}/Audio/` });
-
-    const audioFiles = [];
-
-    for (const file of files) {
-      const filename = path.basename(file.name);
-      const match = filename.match(/^tts_\d+_(\d+)\.mp3$/);
-      if (!match) continue;
-
-      const timestamp = parseInt(match[1]);
-      const delay = Math.max(0, timestamp - parseInt(baseTimestamp)); // in ms
-      const localPath = path.join(sessionFolder, filename);
-
-      await file.download({ destination: localPath });
-      audioFiles.push({ path: localPath, delay });
-    }
-
-    if (audioFiles.length === 0) {
-      return res.status(400).send("No valid TTS audio files found.");
-    }
-
-    const ffmpegInputs = [`-i "${localVideoPath}"`];
-    const filterParts = [];
-    const mixInputs = [];
-
-    mixInputs.push(`[0:a]`);
-
-    audioFiles.forEach((file, i) => {
-      ffmpegInputs.push(`-i "${file.path}"`);
-      const label = `a${i}`;
-      filterParts.push(
-        `[${i + 1}:a]adelay=${file.delay}|${file.delay}[${label}]`
-      );
-      mixInputs.push(`[${label}]`);
-    });
-
-    filterParts.push(
-      `${mixInputs.join("")}amix=inputs=${mixInputs.length}[aout]`
-    );
-
-    const finalOutputName = `final_${Date.now()}.webm`;
-    const finalOutputPath = path.join(sessionFolder, finalOutputName);
-
-    const ffmpegCommand = [
-      ...ffmpegInputs,
-      `-filter_complex "${filterParts.join(";")}"`,
-      `-map 0:v -map "[aout]" -c:v copy -c:a libopus -shortest `,
-      `"${finalOutputPath}"`,
-    ].join(" ");
-
-    console.log("🎬 Executing ffmpeg overlay...");
-    await execPromise(`/usr/bin/ffmpeg ${ffmpegCommand}`);
-
-    // const finalGCSPath = `${ROOT_FOLDER}/${sessionId}/Final/${finalOutputName}`;
-    // await storage.bucket(SESSION_BUCKET).upload(finalOutputPath, {
-    //   destination: finalGCSPath,
-    //   contentType: "video/webm",
-    // });
-
-    const finalGCSPath = `${ROOT_FOLDER}/${sessionId}/${finalOutputName}`;
-    await storage.bucket(SESSION_BUCKET).upload(finalOutputPath, {
-      destination: finalGCSPath,
-      contentType: "video/webm",
-    });
-
-    console.log(`✅ Final video uploaded to ${finalGCSPath}`);
-    //temop
-    await Promise.all([
-      storage.bucket(SESSION_BUCKET).deleteFiles({
-        prefix: `${ROOT_FOLDER}/${sessionId}/Audio/`,
-      }),
-      storage.bucket(SESSION_BUCKET).deleteFiles({
-        prefix: `${ROOT_FOLDER}/${sessionId}/Video/`,
-      }),
-    ]);
-    //here
-    // res.json({
-    //   message: "Overlay complete",
-    //   videoUrl: `https://storage.googleapis.com/${SESSION_BUCKET}/${finalGCSPath}`,
-    // });
-    res.json({
-      message: "Overlay complete",
-      videoUrl: `https://storage.googleapis.com/${SESSION_BUCKET}/${finalGCSPath}`,
-    });
-  } catch (err) {
-    console.error("❌ Overlay error:", err);
-    res.status(500).send("Failed to overlay audio.");
-  }
-});
-
-app.post("/overlay2", upload.none(), async (req, res) => {
-  try {
-    const {
-      sessionId,
-      baseTimestamp,
-      // email,
-      // firstName,
-      // lastName,
-      // testName,
-      // attemptNo,
-    } = req.body;
-
-    if (!sessionId || !baseTimestamp) {
-      return res.status(400).send("Missing sessionId or baseTimestamp");
-    }
-
-    const sessionFolder = path.join(TMP, ROOT_FOLDER, sessionId);
-    fs.rmSync(sessionFolder, { recursive: true, force: true });
-    fs.mkdirSync(sessionFolder, { recursive: true });
-
-    const videoGCSPath = `${ROOT_FOLDER}/${sessionId}/Video/merged.webm`;
-    const localVideoPath = path.join(sessionFolder, "merged.webm");
-
-    await storage.bucket(SESSION_BUCKET).file(videoGCSPath).download({
-      destination: localVideoPath,
-    });
-
-    const [files] = await storage
-      .bucket(SESSION_BUCKET)
-      .getFiles({ prefix: `${ROOT_FOLDER}/${sessionId}/Audio/` });
-
-    const audioFiles = [];
-    for (const file of files) {
-      const filename = path.basename(file.name);
-      const match = filename.match(/^tts_\d+_(\d+)\.mp3$/);
-      if (!match) continue;
-
-      const timestamp = parseInt(match[1]);
-      const delay = Math.max(0, timestamp - parseInt(baseTimestamp));
-      const localPath = path.join(sessionFolder, filename);
-
-      await file.download({ destination: localPath });
-      audioFiles.push({ path: localPath, delay });
-    }
-
-    if (audioFiles.length === 0) {
-      return res.status(400).send("No valid TTS audio files found.");
-    }
-
-    const ffmpegInputs = [`-i "${localVideoPath}"`];
-    const filterParts = [];
-    const mixInputs = [`[0:a]`];
-
-    audioFiles.forEach((file, i) => {
-      ffmpegInputs.push(`-i "${file.path}"`);
-      const label = `a${i}`;
-      filterParts.push(
-        `[${i + 1}:a]adelay=${file.delay}|${file.delay}[${label}]`
-      );
-      mixInputs.push(`[${label}]`);
-    });
-
-    filterParts.push(
-      `${mixInputs.join("")}amix=inputs=${mixInputs.length}[aout]`
-    );
-
-    const finalOutputName = `final_${Date.now()}.webm`;
-    const finalOutputPath = path.join(sessionFolder, finalOutputName);
-
-    const ffmpegCommand = [
-      ...ffmpegInputs,
-      `-filter_complex "${filterParts.join(";")}"`,
-      `-map 0:v -map "[aout]" -c:v copy -c:a libopus -shortest`,
-      `"${finalOutputPath}"`,
-    ].join(" ");
-
-    console.log("🎬 Executing ffmpeg overlay...");
-    await execPromise(`/usr/bin/ffmpeg ${ffmpegCommand}`);
-
-    const finalGCSPath = `${ROOT_FOLDER}/${sessionId}/${finalOutputName}`;
-    await storage.bucket(SESSION_BUCKET).upload(finalOutputPath, {
-      destination: finalGCSPath,
-      contentType: "video/webm",
-    });
-
-    console.log(`✅ Final video uploaded to ${finalGCSPath}`);
-
-    // const params = new URLSearchParams({
-    //   email,
-    //   firstName,
-    //   lastName,
-    //   testName,
-    //   attempt: attemptNo,
-    //   companyId: "LTI",
-    //   videoPath: finalOutputPath,
-    // });
-
-    // try {
-    //   const submitResponse = await fetch(
-    //     `https://myac.ai:99/submit-video?${params.toString()}`,
-    //     { method: "POST" }
-    //   );
-    //   const result = await submitResponse.json();
-    //   console.log("📤 Submission result:", result);
-    // } catch (submitError) {
-    //   console.error("❌ Submission failed:", submitError);
-    //   res.status(500).send("Submission failed.");
-    // }
-
-    await Promise.all([
-      storage.bucket(SESSION_BUCKET).deleteFiles({
-        prefix: `${ROOT_FOLDER}/${sessionId}/Audio/`,
-      }),
-      storage.bucket(SESSION_BUCKET).deleteFiles({
-        prefix: `${ROOT_FOLDER}/${sessionId}/Video/`,
-      }),
-    ]);
-
-    fs.rmSync(sessionFolder, { recursive: true, force: true });
-
-    res.json({
-      message: "Overlay complete and video submitted.",
-      videoUrl: `https://storage.googleapis.com/${SESSION_BUCKET}/${finalGCSPath}`,
-    });
-  } catch (err) {
-    console.error("❌ Overlay error:", err);
-    res.status(500).send(`Failed to overlay and submit video.${err}`);
+    res.status(200).json({ success: true });
+  } catch (error) {
+    console.error("Email send error:", error);
+    res.status(500).json({ success: false, message: "Failed to send email" });
   }
 });
 
