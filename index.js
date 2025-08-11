@@ -29,7 +29,7 @@ const TMP = "/tmp";
 const SESSION_BUCKET = "zimulate";
 const BUCKET_NAME = "zimulate";
 const ROOT_FOLDER = "sessions";
-const ELEVEN_API_KEY = "sk_b7ec21f390dd84e163725b4876fc9bb42a5e744d75e43f07";
+const ELEVEN_API_KEY = "sk_c7b1c1925e918c3c7ae8a3007acf57f489fb4e099b151b8b";
 
 const storage = new Storage();
 const ttsClient = new TextToSpeechClient();
