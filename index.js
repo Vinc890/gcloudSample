@@ -14,7 +14,6 @@ const axios = require("axios");
 const { v4: uuidv4 } = require("uuid");
 const ffmpeg = require("fluent-ffmpeg");
 
-
 const PORT = 3000;
 
 const app = express();
@@ -140,6 +139,7 @@ app.post("/upload-to-gcs", async (req, res) => {
     agentId,
     sessionId,
     videoUrl,
+    startTimeStamp,
   } = req.body;
 
   try {
@@ -190,6 +190,19 @@ app.post("/upload-to-gcs", async (req, res) => {
     if (!conversationId) throw new Error("No conversation found.");
 
     console.log(" Using conversation ID:", conversationId);
+
+    const convoTimeStamp = await axios.get(
+      `https://api.elevenlabs.io/v1/convai/conversations/${conversationId}`,
+      {
+        headers: { "xi-api-key": ELEVEN_API_KEY },
+        params: { agent_id: agentId },
+      }
+    );
+
+    const offsetdiff =
+      startTimeStamp - convoTimeStamp.metadata.start_time_unix_secs;
+
+    console.log("Offset", offsetdiff);
 
     const audioBuffer = await waitForAudio(conversationId, ELEVEN_API_KEY);
     fs.writeFileSync(tempAudioPath, audioBuffer);
@@ -341,8 +354,6 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
     res.status(200).send("Chunk received");
   }
 });
-
-
 
 const SCOPES = ["https://www.googleapis.com/auth/gmail.send"];
 
