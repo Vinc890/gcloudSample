@@ -191,18 +191,18 @@ app.post("/upload-to-gcs", async (req, res) => {
 
     console.log(" Using conversation ID:", conversationId);
 
-    const convoTimeStamp = await axios.get(
-      `https://api.elevenlabs.io/v1/convai/conversations/${conversationId}`,
-      {
-        headers: { "xi-api-key": ELEVEN_API_KEY },
-        params: { agent_id: agentId },
-      }
-    );
+    // const convoTimeStamp = await axios.get(
+    //   `https://api.elevenlabs.io/v1/convai/conversations/${conversationId}`,
+    //   {
+    //     headers: { "xi-api-key": ELEVEN_API_KEY },
+    //     params: { agent_id: agentId },
+    //   }
+    // );
 
-    const offsetdiff =
-      startTimeStamp - convoTimeStamp.metadata.start_time_unix_secs;
+    // const offsetdiff =
+    //   startTimeStamp - convoTimeStamp.metadata.start_time_unix_secs;
 
-    console.log("Offset", offsetdiff);
+    // console.log("Offset", offsetdiff);
 
     const audioBuffer = await waitForAudio(conversationId, ELEVEN_API_KEY);
     fs.writeFileSync(tempAudioPath, audioBuffer);
