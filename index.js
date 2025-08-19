@@ -128,12 +128,6 @@ function logParameters(logs) {
 }
 
 app.post("/upload-to-gcs", async (req, res) => {
-  logParameters({
-    testLogID: testLogID,
-    data: {
-      "upload-to-gcs req.body": req.body,
-    },
-  });
   const {
     companyId,
     testName,
@@ -148,6 +142,13 @@ app.post("/upload-to-gcs", async (req, res) => {
 
   try {
     let mergedPath;
+
+    logParameters({
+      testLogID: testLogID,
+      data: {
+        "upload-to-gcs req.body": req.body,
+      },
+    });
 
     if (videoUrl) {
       logParameters({
