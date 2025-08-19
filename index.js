@@ -129,6 +129,13 @@ function logParameters(logs) {
 
 app.post("/conversation-token", async (req, res) => {
   const { agentId, testLogID } = req.body;
+  logParameters({
+    testLogID: testLogID,
+    data: {
+      step: "Token call 11Labs",
+      "token call agentId": agentId,
+    },
+  });
   const response = await fetch(
     "https://api.elevenlabs.io/v1/convai/conversation/token",
     {
