@@ -133,7 +133,9 @@ app.post("/conversation-token", async (req, res) => {
     testLogID: testLogID,
     data: {
       step: "Token call 11Labs",
-      "token call agentId": agentId,
+      "token call agentId": agentId
+        ? agentId
+        : "agent_7601k24j14jtfv6s6m3r46bcafxq",
     },
   });
   const response = await fetch(
@@ -145,7 +147,7 @@ app.post("/conversation-token", async (req, res) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        agent_id: agentId,
+        agent_id: agentId ? agentId : "agent_7601k24j14jtfv6s6m3r46bcafxq",
       }),
     }
   );
