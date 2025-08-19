@@ -96,6 +96,12 @@ function getCurrentDateFormatted() {
   return `${day}_${month}_${year}`;
 }
 
+function logParameters(...args) {
+  args.forEach(([message, value]) => {
+    console.log(`${message}: ${value}`);
+  });
+}
+
 app.post("/get-token1", async (req, res) => {
   const { agentId, userId } = req.body;
   console.log("[Backend] Request received:", { agentId, userId });
@@ -140,13 +146,15 @@ app.post("/upload-to-gcs", async (req, res) => {
     sessionId,
     videoUrl,
     startTimeStamp,
+    testLogID,
   } = req.body;
 
   try {
     let mergedPath;
 
     if (videoUrl) {
-      console.log("🌐 Using merged video from URL:", videoUrl);
+      logParameters(["Using merged video from URL", videoUrl],["testLogID",testLogID]);
+
       const tempDir = path.join(__dirname, "temp");
       if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
 
@@ -155,16 +163,20 @@ app.post("/upload-to-gcs", async (req, res) => {
         responseType: "arraybuffer",
       });
       fs.writeFileSync(mergedPath, Buffer.from(response.data));
-      console.log("✅ Downloaded merged video locally:", mergedPath);
+      logParameters(
+        ["Downloaded merged video locally", mergedPath],
+        ["chunkRes", chunkRes]
+        ,["testLogID",testLogID]
+      );
     } else {
       const chunkDir = path.join(TMP, ROOT_FOLDER, sessionId, "chunks");
       mergedPath = path.join(chunkDir, "merged.webm");
 
       if (!fs.existsSync(mergedPath)) {
-        console.error("❌ Merged video not found at:", mergedPath);
+        logParameters(["Merged video not found at", mergedPath],["testLogID",testLogID]);
         return res.status(404).json({ error: "Merged video not found." });
       }
-      console.log("✅ Found merged video locally:", mergedPath);
+      logParameters(["Found merged video locally", mergedPath],["testLogID",testLogID]);
     }
 
     const tempDir = path.join(__dirname, "temp");
@@ -173,6 +185,7 @@ app.post("/upload-to-gcs", async (req, res) => {
     const audioFileName = `audio-${uuidv4()}.mp3`;
     const sanitizedEmail = email.replace(/[@.]/g, "_");
     const finalFileName = `FinalVideo_${sanitizedEmail}_${attemptNo}.webm`;
+    logParameters(["finalFileName", finalFileName],["testLogID",testLogID]);
 
     const tempAudioPath = path.join(tempDir, audioFileName);
     const tempMergedPath = path.join(tempDir, finalFileName);
@@ -188,8 +201,7 @@ app.post("/upload-to-gcs", async (req, res) => {
     const conversationId =
       convoListRes.data?.conversations?.[0]?.conversation_id;
     if (!conversationId) throw new Error("No conversation found.");
-
-    console.log(" Using conversation ID:", conversationId);
+    logParameters(["Using conversation ID:", convoListRes.data],["testLogID",testLogID]);
 
     // const convoTimeStamp = await axios.get(
     //   `https://api.elevenlabs.io/v1/convai/conversations/${conversationId}`,
@@ -206,16 +218,16 @@ app.post("/upload-to-gcs", async (req, res) => {
 
     const audioBuffer = await waitForAudio(conversationId, ELEVEN_API_KEY);
     fs.writeFileSync(tempAudioPath, audioBuffer);
-    console.log("✅ Audio saved at:", tempAudioPath);
+    logParameters(["Audio saved at:", tempAudioPath],["testLogID",testLogID]);
 
     const videoDuration = await getMediaDuration(mergedPath);
     const audioDuration = await getMediaDuration(tempAudioPath);
     // const offset = Math.max(videoDuration - audioDuration, 0).toFixed(2);
     const offset = 2;
 
-    console.log(` Video duration: ${videoDuration}s`);
-    console.log(` Audio duration: ${audioDuration}s`);
-    console.log(` Trimming first ${offset}s from video...`);
+    // console.log(` Video duration: ${videoDuration}s`);
+    // console.log(` Audio duration: ${audioDuration}s`);
+    // console.log(` Trimming first ${offset}s from video...`);
 
     await new Promise((resolve, reject) => {
       ffmpeg()
@@ -231,32 +243,34 @@ app.post("/upload-to-gcs", async (req, res) => {
           "-shortest",
         ])
         .on("end", () => {
-          console.log("✅ Trimmed and merged video+audio.");
+          console.log("✅ ");
+          logParameters(["merged video+audio."],["testLogID",testLogID]);
+
           resolve();
         })
         .on("error", (err) => {
-          console.error("❌ ffmpeg error:", err.message);
+          logParameters(["ffmpeg error:", err.message],["testLogID",testLogID]);
+
           reject(err);
         })
         .save(tempMergedPath);
     });
 
     const gcsPath = `${companyId}/${testName}/${email}/${attemptNo}/${getCurrentDateFormatted()}/${finalFileName}`;
-    console.log(" Uploading to GCS at:", gcsPath);
+    logParameters(["Uploading to GCS at:", gcsPath],["testLogID",testLogID]);
 
     await storage.bucket(BUCKET_NAME).upload(tempMergedPath, {
       destination: gcsPath,
       metadata: { contentType: "video/webm" },
     });
 
-    console.log(" Final video uploaded to GCS.");
-
     const finalVideoUrl = `https://storage.googleapis.com/${BUCKET_NAME}/${gcsPath}`;
+    logParameters(["Final video uploaded to GCS.", finalVideoUrl],["testLogID",testLogID]);
 
     [tempAudioPath, tempMergedPath, mergedPath].forEach((file) => {
       if (fs.existsSync(file)) {
         fs.unlinkSync(file);
-        console.log(` Deleted temp file: ${file}`);
+        logParameters(["Deleted temp file:", file],["testLogID",testLogID]);
       }
     });
 
@@ -275,10 +289,11 @@ app.post("/upload-to-gcs", async (req, res) => {
           headers: { "xi-api-key": ELEVEN_API_KEY },
         }
       );
-      console.log(`🗑️ Deleted agent: ${agentId}`);
+      logParameters(["Deleted agent :", agentId],["testLogID",testLogID]);
     } catch (err) {
-      console.error("⚠️ Failed to clean up agent/conversation:", err.message);
+      logParameters(["Failed to Delete agent :", err.message],["testLogID",testLogID]);
     }
+    logParameters(["finalVideoUrl", finalVideoUrl],["testLogID",testLogID]);
 
     res.json({
       success: true,
@@ -286,13 +301,13 @@ app.post("/upload-to-gcs", async (req, res) => {
       videoUrl: finalVideoUrl,
     });
   } catch (err) {
-    console.error("❌ Error in upload-to-gcs handler:", err.message);
+    logParameters(["Error in upload-to-gcs handler", err.message],["testLogID",testLogID]);
     res.status(500).json({ error: err.message });
   }
 });
 
 app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
-  const { index, totalChunks, sessionId } = req.body;
+  const { index, totalChunks, sessionId, testLogID } = req.body;
 
   if (!index || !totalChunks || !sessionId || !req.file) {
     return res.status(400).send("Missing required fields or file.");
@@ -308,7 +323,7 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
     .readdirSync(chunkDir)
     .filter((f) => f.startsWith("chunk_")).length;
   console.log(
-    `📥 Received chunk ${index}. Total received: ${receivedChunks}/${totalChunks}`
+    `📥 Received chunk ${index} for ${sessionId}-${testLogID} Total received: ${receivedChunks}/${totalChunks}`
   );
 
   if (receivedChunks == parseInt(totalChunks)) {
@@ -353,6 +368,20 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
   } else {
     res.status(200).send("Chunk received");
   }
+});
+
+app.post("/log", (req, res) => {
+  const params = req.body;
+
+  if (!params || typeof params !== "object") {
+    return res
+      .status(400)
+      .json({ error: "Invalid parameters. Send a JSON object." });
+  }
+
+  logParameters(params);
+
+  res.json({ status: "Parameters logged successfully" });
 });
 
 const SCOPES = ["https://www.googleapis.com/auth/gmail.send"];
