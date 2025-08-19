@@ -127,6 +127,41 @@ function logParameters(logs) {
   console.log(log);
 }
 
+app.post("/conversation-token", async (req, res) => {
+  const { agentId } = req.body;
+  const response = await fetch(
+    "https://api.elevenlabs.io/v1/convai/conversation/token",
+    {
+      method: "POST",
+      headers: {
+        "xi-api-key": ELEVEN_API_KEY,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        agent_id: agentId,
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    logParameters({
+      testLogID: testLogID,
+      data: {
+        "token call failed": response,
+      },
+    });
+    return res.status(500).send("Failed to get conversation token");
+  }
+  logParameters({
+    testLogID: testLogID,
+    data: {
+      "11Labs Token": response,
+    },
+  });
+  const body = await response.json();
+  res.send(body.token);
+});
+
 app.post("/upload-to-gcs", async (req, res) => {
   const {
     companyId,
