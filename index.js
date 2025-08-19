@@ -170,7 +170,6 @@ app.post("/upload-to-gcs", async (req, res) => {
         testLogID: testLogID,
         data: {
           "Downloaded merged video locally": mergedPath,
-          chunkRes: chunkRes,
         },
       });
     } else {
