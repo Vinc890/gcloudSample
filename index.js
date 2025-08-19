@@ -39,8 +39,12 @@ async function waitForAudio(
   maxRetries = 10,
   delayMs = 5000
 ) {
-  console.log(`⏳ Waiting for audio for conversation ID: ${conversationId}`);
-
+  logParameters({
+    testLogID: testLogID,
+    data: {
+      " Waiting for audio for conversation ID": conversationId,
+    },
+  });
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const convoRes = await axios.get(
@@ -48,9 +52,15 @@ async function waitForAudio(
         { headers: { "xi-api-key": apiKey } }
       );
       const { message_count, status } = convoRes.data;
-      console.log(
-        `🔁 Attempt ${attempt}: status=${status}, message_count=${message_count}`
-      );
+
+      logParameters({
+        testLogID: testLogID,
+        data: {
+          Attempt: attempt,
+          status: status,
+          message_count: message_count,
+        },
+      });
 
       if (status === "done") {
         try {
@@ -61,15 +71,31 @@ async function waitForAudio(
               responseType: "arraybuffer",
             }
           );
-          console.log("✅ Audio fetched successfully.");
+          logParameters({
+            testLogID: testLogID,
+            data: {
+              "Audio fetched successfully.": audioRes,
+            },
+          });
           return audioRes.data;
         } catch (err) {
           if (err.response?.status !== 404) throw err;
-          console.log("⚠️ Audio not ready yet (404). Will retry...");
+          logParameters({
+            testLogID: testLogID,
+            data: {
+              "Audio not ready yet (404). Will retry...":
+                "Audio not ready yet (404). Will retry...",
+            },
+          });
         }
       }
     } catch (err) {
-      console.error("❌ Error checking conversation status:", err.message);
+      logParameters({
+        testLogID: testLogID,
+        data: {
+          "Error checking conversation status:": err.messager,
+        },
+      });
     }
     await new Promise((res) => setTimeout(res, delayMs));
   }
@@ -101,41 +127,13 @@ function logParameters(logs) {
   console.log(log);
 }
 
-app.post("/get-token1", async (req, res) => {
-  const { agentId, userId } = req.body;
-  console.log("[Backend] Request received:", { agentId, userId });
-
-  try {
-    const response = await fetch(
-      "https://api.elevenlabs.io/v1/convai/conversation/token",
-      {
-        method: "POST",
-        headers: {
-          "xi-api-key": process.env.ELEVENLABS_API_KEY,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ agent_id: agentId, user_id: userId }),
-      }
-    );
-
-    if (!response.ok) {
-      const error = await response.text();
-      console.error("[Backend] Error fetching token:", error);
-      return res.status(500).json({ error });
-    }
-
-    const data = await response.json();
-    console.log("[Backend] Token generated", data);
-    res.json({ token: data.token });
-  } catch (err) {
-    console.error("[Backend] Exception:", err);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
 app.post("/upload-to-gcs", async (req, res) => {
-  console.log("upload-to-gcs ", req.body);
-
+  logParameters({
+    testLogID: testLogID,
+    data: {
+      "upload-to-gcs req.body": req.body,
+    },
+  });
   const {
     companyId,
     testName,
@@ -273,7 +271,6 @@ app.post("/upload-to-gcs", async (req, res) => {
           "-shortest",
         ])
         .on("end", () => {
-          console.log("✅ ");
           logParameters({
             testLogID: testLogID,
             data: {
@@ -336,7 +333,12 @@ app.post("/upload-to-gcs", async (req, res) => {
           headers: { "xi-api-key": ELEVEN_API_KEY },
         }
       );
-      console.log(`🗑️ Deleted conversation: ${conversationId}`);
+      logParameters({
+        testLogID: testLogID,
+        data: {
+          "Deleted conversation:": conversationId,
+        },
+      });
 
       await axios.delete(
         `https://api.elevenlabs.io/v1/convai/agents/${agentId}`,
@@ -395,13 +397,24 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
   const receivedChunks = fs
     .readdirSync(chunkDir)
     .filter((f) => f.startsWith("chunk_")).length;
-  console.log(
-    `📥 Received chunk ${index} for ${sessionId}-${testLogID} Total received: ${receivedChunks}/${totalChunks}`
-  );
+  logParameters({
+    testLogID: testLogID,
+    data: {
+      "Received chunk": index,
+      sessionId: sessionId,
+      receivedChunks: receivedChunks,
+      totalChunks: totalChunks,
+    },
+  });
 
   if (receivedChunks == parseInt(totalChunks)) {
-    console.log("📦 All chunks received. Starting merge...");
-
+    logParameters({
+      testLogID: testLogID,
+      data: {
+        "All chunks received. Starting merge...":
+          "All chunks received. Starting merge...",
+      },
+    });
     const chunkFiles = fs
       .readdirSync(chunkDir)
       .filter((f) => f.startsWith("chunk_"))
@@ -424,10 +437,12 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
         contentType: "video/webm",
       });
 
-      console.log(
-        `✅ Merged video uploaded to gs://${SESSION_BUCKET}/${gcsPath}`
-      );
-
+      logParameters({
+        testLogID: testLogID,
+        data: {
+          "Merged video uploaded to gs:": `gs://${SESSION_BUCKET}/${gcsPath}`,
+        },
+      });
       res.status(200).json({
         message: "Chunks uploaded and video merged.",
         videoUrl: `https://storage.googleapis.com/${SESSION_BUCKET}/${gcsPath}`,
@@ -435,7 +450,12 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
     });
 
     writeStream.on("error", (err) => {
-      console.error("❌ Failed to merge chunks:", err);
+      logParameters({
+        testLogID: testLogID,
+        data: {
+          "Failed to merge chunks:": err,
+        },
+      });
       res.status(500).send("Failed to merge chunks.");
     });
   } else {
