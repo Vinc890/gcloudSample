@@ -43,6 +43,8 @@ async function waitForAudio(
   logParameters({
     testLogID: testLogID,
     data: {
+      step: "Waiting for audio for conversation ID",
+      side: "server",
       " Waiting for audio for conversation ID": conversationId,
     },
   });
@@ -59,6 +61,7 @@ async function waitForAudio(
         testLogID: testLogID,
         data: {
           step: "Fetching details for audio",
+          side: "server",
           Attempt: attempt,
           status: status,
           message_count: message_count,
@@ -74,6 +77,8 @@ async function waitForAudio(
       logParameters({
         testLogID: testLogID,
         data: {
+          step: "Error checking conversation status",
+          side: "server",
           "Error checking conversation status:": err,
         },
       });
@@ -87,6 +92,7 @@ async function waitForAudio(
         testLogID: testLogID,
         data: {
           step: "Fetching audio",
+          side: "server",
           conversationId: conversationId,
         },
       });
@@ -101,6 +107,7 @@ async function waitForAudio(
         testLogID: testLogID,
         data: {
           step: "Fetched audio",
+          side: "server",
           "Audio fetched successfully.": true,
         },
       });
@@ -110,8 +117,8 @@ async function waitForAudio(
       logParameters({
         testLogID: testLogID,
         data: {
-          "Audio not ready yet (404). Will retry...":
-            "Audio not ready yet (404). Will retry...",
+          step: "Audio not ready yet (404). Will retry",
+          side: "server",
         },
       });
     }
@@ -201,6 +208,8 @@ app.post("/upload-to-gcs", async (req, res) => {
     logParameters({
       testLogID: testLogID,
       data: {
+        step: "upload-to-gcs req.body",
+        side: "server",
         "upload-to-gcs req.body": req.body,
       },
     });
@@ -209,6 +218,8 @@ app.post("/upload-to-gcs", async (req, res) => {
       logParameters({
         testLogID: testLogID,
         data: {
+          step: "Using merged video from URL",
+          side: "server",
           "Using merged video from URL": videoUrl,
         },
       });
@@ -223,6 +234,8 @@ app.post("/upload-to-gcs", async (req, res) => {
       logParameters({
         testLogID: testLogID,
         data: {
+          step: "Downloaded merged video locally",
+          side: "server",
           "Downloaded merged video locally": mergedPath,
         },
       });
@@ -234,6 +247,8 @@ app.post("/upload-to-gcs", async (req, res) => {
         logParameters({
           testLogID: testLogID,
           data: {
+            step: "Merged video not found at",
+            side: "server",
             "Merged video not found at": mergedPath,
           },
         });
@@ -242,6 +257,8 @@ app.post("/upload-to-gcs", async (req, res) => {
       logParameters({
         testLogID: testLogID,
         data: {
+          step: "Found merged video locally",
+          side: "server",
           "Found merged video locally": mergedPath,
         },
       });
@@ -257,6 +274,7 @@ app.post("/upload-to-gcs", async (req, res) => {
       testLogID: testLogID,
       data: {
         step: "setting the final output video name",
+        side: "server",
         finalFileName: finalFileName,
       },
     });
@@ -278,6 +296,8 @@ app.post("/upload-to-gcs", async (req, res) => {
     logParameters({
       testLogID: testLogID,
       data: {
+        step: "fetched conversation ID for agent",
+        side: "server",
         "fetched conversation ID for agent:": convoListRes.data,
         testLogID: testLogID,
       },
@@ -305,6 +325,8 @@ app.post("/upload-to-gcs", async (req, res) => {
     logParameters({
       testLogID: testLogID,
       data: {
+        step: "Convo Audio saved",
+        side: "server",
         "Audio saved at:": tempAudioPath,
       },
     });
@@ -335,7 +357,8 @@ app.post("/upload-to-gcs", async (req, res) => {
           logParameters({
             testLogID: testLogID,
             data: {
-              "merged video+audio.": "merged video+audio.",
+              step: "merged video+audio",
+              side: "server",
             },
           });
 
@@ -345,6 +368,8 @@ app.post("/upload-to-gcs", async (req, res) => {
           logParameters({
             testLogID: testLogID,
             data: {
+              step: "ffmpeg error",
+              side: "server",
               "ffmpeg error:": err,
             },
           });
@@ -358,6 +383,8 @@ app.post("/upload-to-gcs", async (req, res) => {
     logParameters({
       testLogID: testLogID,
       data: {
+        step: "Uploading Final Video to GCS",
+        side: "server",
         "Uploading to GCS at:": gcsPath,
       },
     });
@@ -371,6 +398,8 @@ app.post("/upload-to-gcs", async (req, res) => {
     logParameters({
       testLogID: testLogID,
       data: {
+        step: "Uploaded Final Video to GCS",
+        side: "server",
         "Final video uploaded to GCS.": finalVideoUrl,
       },
     });
@@ -381,6 +410,8 @@ app.post("/upload-to-gcs", async (req, res) => {
         logParameters({
           testLogID: testLogID,
           data: {
+            step: "Deleted the temp files",
+            side: "server",
             "Deleted temp file:": file,
           },
         });
@@ -397,6 +428,8 @@ app.post("/upload-to-gcs", async (req, res) => {
       logParameters({
         testLogID: testLogID,
         data: {
+          step: "Deleted convo",
+          side: "server",
           "Deleted conversation:": conversationId,
         },
       });
@@ -410,6 +443,8 @@ app.post("/upload-to-gcs", async (req, res) => {
       logParameters({
         testLogID: testLogID,
         data: {
+          step: "Deleted agent",
+          side: "server",
           "Deleted agent :": agentId,
         },
       });
@@ -417,13 +452,19 @@ app.post("/upload-to-gcs", async (req, res) => {
       logParameters({
         testLogID: testLogID,
         data: {
+          step: "failed to delete agent",
+          side: "server",
           "Failed to Delete agent :": err.message,
         },
       });
     }
     logParameters({
       testLogID: testLogID,
-      data: { finalVideoUrl: finalVideoUrl },
+      data: {
+        step: "Final Video URL",
+        side: "server",
+        finalVideoUrl: finalVideoUrl,
+      },
     });
 
     res.json({
@@ -435,6 +476,8 @@ app.post("/upload-to-gcs", async (req, res) => {
     logParameters({
       testLogID: testLogID,
       data: {
+        step: "Error in upload-to-gcs",
+        side: "server",
         "Error in upload-to-gcs handler": JSON.stringify(err),
       },
     });
@@ -461,6 +504,8 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
   logParameters({
     testLogID: testLogID,
     data: {
+      step: "Receiving chunks",
+      side: "server",
       "Received chunk": index,
       sessionId: sessionId,
       receivedChunks: receivedChunks,
@@ -472,8 +517,8 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
     logParameters({
       testLogID: testLogID,
       data: {
-        "All chunks received. Starting merge...":
-          "All chunks received. Starting merge...",
+        step: "All chunks received. Starting merge",
+        side: "server",
       },
     });
     const chunkFiles = fs
@@ -501,6 +546,8 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
       logParameters({
         testLogID: testLogID,
         data: {
+          step: "Merged video uploaded to gs",
+          side: "server",
           "Merged video uploaded to gs:": `gs://${SESSION_BUCKET}/${gcsPath}`,
         },
       });
@@ -514,6 +561,8 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
       logParameters({
         testLogID: testLogID,
         data: {
+          step: "Failed to merge chunks",
+          side: "server",
           "Failed to merge chunks:": err,
         },
       });
