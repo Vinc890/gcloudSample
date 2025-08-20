@@ -46,9 +46,10 @@ async function waitForAudio(
       " Waiting for audio for conversation ID": conversationId,
     },
   });
+  let convoRes;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      const convoRes = await axios.get(
+      convoRes = await axios.get(
         `https://api.elevenlabs.io/v1/convai/conversations/${conversationId}`,
         { headers: { "xi-api-key": apiKey } }
       );
@@ -57,51 +58,64 @@ async function waitForAudio(
       logParameters({
         testLogID: testLogID,
         data: {
+          step: "Fetching details for audio",
           Attempt: attempt,
           status: status,
           message_count: message_count,
+          maxRetries: maxRetries,
+          condition: attempt <= maxRetries,
         },
       });
 
-      if (status === "done") {
-        try {
-          const audioRes = await axios.get(
-            `https://api.elevenlabs.io/v1/convai/conversations/${conversationId}/audio`,
-            {
-              headers: { "xi-api-key": apiKey },
-              responseType: "arraybuffer",
-            }
-          );
-          logParameters({
-            testLogID: testLogID,
-            data: {
-              "Audio fetched successfully.": audioRes,
-            },
-          });
-          return audioRes.data;
-        } catch (err) {
-          if (err.response?.status !== 404) throw err;
-          logParameters({
-            testLogID: testLogID,
-            data: {
-              "Audio not ready yet (404). Will retry...":
-                "Audio not ready yet (404). Will retry...",
-            },
-          });
-        }
+      if (status == "done") {
+        break;
       }
     } catch (err) {
       logParameters({
         testLogID: testLogID,
         data: {
-          "Error checking conversation status:": err.messager,
+          "Error checking conversation status:": err,
         },
       });
     }
     await new Promise((res) => setTimeout(res, delayMs));
   }
 
-  throw new Error("⏰ Timed out waiting for conversation audio.");
+  if (convoRes.data.status === "done") {
+    try {
+      logParameters({
+        testLogID: testLogID,
+        data: {
+          step: "Fetching audio",
+          conversationId: conversationId,
+        },
+      });
+      const audioRes = await axios.get(
+        `https://api.elevenlabs.io/v1/convai/conversations/${conversationId}/audio`,
+        {
+          headers: { "xi-api-key": apiKey },
+          responseType: "arraybuffer",
+        }
+      );
+      logParameters({
+        testLogID: testLogID,
+        data: {
+          step: "Fetched audio",
+          "Audio fetched successfully.": audioRes,
+        },
+      });
+      return audioRes.data;
+    } catch (err) {
+      if (err.response?.status !== 404) throw err;
+      logParameters({
+        testLogID: testLogID,
+        data: {
+          "Audio not ready yet (404). Will retry...":
+            "Audio not ready yet (404). Will retry...",
+        },
+      });
+    }
+  } else throw new Error("⏰ Timed out waiting for conversation audio.");
 }
 
 const getMediaDuration = (filePath) => {
@@ -242,6 +256,7 @@ app.post("/upload-to-gcs", async (req, res) => {
     logParameters({
       testLogID: testLogID,
       data: {
+        step: "setting the final output video name",
         finalFileName: finalFileName,
       },
     });
@@ -263,7 +278,7 @@ app.post("/upload-to-gcs", async (req, res) => {
     logParameters({
       testLogID: testLogID,
       data: {
-        "Using conversation ID:": convoListRes.data,
+        "fetched conversation ID for agent:": convoListRes.data,
         testLogID: testLogID,
       },
     });
@@ -330,7 +345,7 @@ app.post("/upload-to-gcs", async (req, res) => {
           logParameters({
             testLogID: testLogID,
             data: {
-              "ffmpeg error:": err.message,
+              "ffmpeg error:": err,
             },
           });
 
