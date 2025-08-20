@@ -101,7 +101,7 @@ async function waitForAudio(
         testLogID: testLogID,
         data: {
           step: "Fetched audio",
-          "Audio fetched successfully.": audioRes,
+          "Audio fetched successfully.": true,
         },
       });
       return audioRes.data;
@@ -435,7 +435,7 @@ app.post("/upload-to-gcs", async (req, res) => {
     logParameters({
       testLogID: testLogID,
       data: {
-        "Error in upload-to-gcs handler": err,
+        "Error in upload-to-gcs handler": JSON.stringify(err),
       },
     });
     res.status(500).json({ error: err.message });
