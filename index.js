@@ -27,6 +27,8 @@ const ELEVEN_API_KEY = "sk_c7b1c1925e918c3c7ae8a3007acf57f489fb4e099b151b8b";
 
 const storage = new Storage();
 
+
+
 async function waitForAudio(conversationId, apiKey, testLogID) {
   logParameters({
     testLogID: testLogID,
@@ -133,22 +135,29 @@ app.post("/conversation-token", async (req, res) => {
 
   try {
     const response = await fetch(
-      "https://api.elevenlabs.io/v1/convai/conversation/token",
+      "https://api.elevenlabs.io/v1/convai/conversation/token?agent_id=" +
+        (agentId || "agent_7601k24j14jtfv6s6m3r46bcafxq"),
       {
-        method: "POST",
+        method: "get",
         headers: {
           "xi-api-key": ELEVEN_API_KEY,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          agent_id: agentId || "agent_7601k24j14jtfv6s6m3r46bcafxq",
-        }),
       }
     );
 
     const body = await response.json();
 
     if (!response.ok) {
+      logParameters({
+        testLogID: testLogID,
+        data: {
+          step: "11labs Token failed",
+          side: "server",
+          "11labs Token failed": body,
+        },
+      });
+
       return res.status(500).json({
         error: "Failed to get conversation token",
         details: body,
@@ -156,14 +165,38 @@ app.post("/conversation-token", async (req, res) => {
     }
 
     if (!body.token) {
+      logParameters({
+        testLogID: testLogID,
+        data: {
+          step: "11labs Token failed",
+          side: "server",
+          "NO Token available": body,
+        },
+      });
+
       return res.status(500).json({
         error: "No token returned from ElevenLabs",
         details: body,
       });
     }
-
+    logParameters({
+      testLogID: testLogID,
+      data: {
+        step: "11labs Token successful",
+        side: "server",
+        "Token available": body,
+      },
+    });
     res.json({ token: body.token });
   } catch (err) {
+    logParameters({
+      testLogID: testLogID,
+      data: {
+        step: "11labs Token failed",
+        side: "server",
+        "Token failed": err,
+      },
+    });
     res.status(500).json({ error: "Server error", details: err.message });
   }
 });
@@ -272,6 +305,7 @@ app.post("/upload-to-gcs", async (req, res) => {
     const conversationId =
       convoListRes.data?.conversations?.[0]?.conversation_id;
     if (!conversationId) throw new Error("No conversation found.");
+
     logParameters({
       testLogID: testLogID,
       data: {
