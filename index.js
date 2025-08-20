@@ -37,7 +37,8 @@ async function waitForAudio(
   conversationId,
   apiKey,
   maxRetries = 10,
-  delayMs = 5000
+  delayMs = 5000,
+  testLogID
 ) {
   logParameters({
     testLogID: testLogID,
@@ -167,7 +168,6 @@ app.post("/conversation-token", async (req, res) => {
   }
 });
 
-
 app.post("/upload-to-gcs", async (req, res) => {
   const {
     companyId,
@@ -281,7 +281,11 @@ app.post("/upload-to-gcs", async (req, res) => {
 
     // console.log("Offset", offsetdiff);
 
-    const audioBuffer = await waitForAudio(conversationId, ELEVEN_API_KEY);
+    const audioBuffer = await waitForAudio(
+      conversationId,
+      ELEVEN_API_KEY,
+      testLogID
+    );
     fs.writeFileSync(tempAudioPath, audioBuffer);
     logParameters({
       testLogID: testLogID,
@@ -416,7 +420,7 @@ app.post("/upload-to-gcs", async (req, res) => {
     logParameters({
       testLogID: testLogID,
       data: {
-        "Error in upload-to-gcs handler": err.message,
+        "Error in upload-to-gcs handler": err,
       },
     });
     res.status(500).json({ error: err.message });
