@@ -4,11 +4,8 @@ const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
 const { Storage } = require("@google-cloud/storage");
-const { TextToSpeechClient } = require("@google-cloud/text-to-speech");
 const util = require("util");
-const execPromise = util.promisify(require("child_process").exec);
 const cors = require("cors");
-const speech = require("@google-cloud/speech");
 const { google } = require("googleapis");
 const axios = require("axios");
 const { v4: uuidv4 } = require("uuid");
@@ -20,8 +17,6 @@ const app = express();
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 app.use(cors());
-const client = new speech.SpeechClient();
-const upload = multer({ storage: multer.memoryStorage() });
 const chunkUpload = multer({ storage: multer.memoryStorage() });
 
 const TMP = "/tmp";
@@ -31,15 +26,8 @@ const ROOT_FOLDER = "sessions";
 const ELEVEN_API_KEY = "sk_c7b1c1925e918c3c7ae8a3007acf57f489fb4e099b151b8b";
 
 const storage = new Storage();
-const ttsClient = new TextToSpeechClient();
 
-async function waitForAudio(
-  conversationId,
-  apiKey,
-  maxRetries = 10,
-  delayMs = 5000,
-  testLogID
-) {
+async function waitForAudio(conversationId, apiKey, testLogID) {
   logParameters({
     testLogID: testLogID,
     data: {
@@ -49,7 +37,7 @@ async function waitForAudio(
     },
   });
   let convoRes;
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+  for (let attempt = 1; attempt <= 10; attempt++) {
     try {
       convoRes = await axios.get(
         `https://api.elevenlabs.io/v1/convai/conversations/${conversationId}`,
@@ -83,7 +71,7 @@ async function waitForAudio(
         },
       });
     }
-    await new Promise((res) => setTimeout(res, delayMs));
+    await new Promise((res) => setTimeout(res, 5000));
   }
 
   if (convoRes.data.status === "done") {
@@ -124,15 +112,6 @@ async function waitForAudio(
     }
   } else throw new Error("⏰ Timed out waiting for conversation audio.");
 }
-
-const getMediaDuration = (filePath) => {
-  return new Promise((resolve, reject) => {
-    ffmpeg.ffprobe(filePath, (err, metadata) => {
-      if (err) return reject(err);
-      resolve(metadata.format.duration);
-    });
-  });
-};
 
 function getCurrentDateFormatted() {
   const today = new Date();
@@ -303,19 +282,6 @@ app.post("/upload-to-gcs", async (req, res) => {
       },
     });
 
-    // const convoTimeStamp = await axios.get(
-    //   `https://api.elevenlabs.io/v1/convai/conversations/${conversationId}`,
-    //   {
-    //     headers: { "xi-api-key": ELEVEN_API_KEY },
-    //     params: { agent_id: agentId },
-    //   }
-    // );
-
-    // const offsetdiff =
-    //   startTimeStamp - convoTimeStamp.metadata.start_time_unix_secs;
-
-    // console.log("Offset", offsetdiff);
-
     const audioBuffer = await waitForAudio(
       conversationId,
       ELEVEN_API_KEY,
@@ -331,21 +297,10 @@ app.post("/upload-to-gcs", async (req, res) => {
       },
     });
 
-    const videoDuration = await getMediaDuration(mergedPath);
-    const audioDuration = await getMediaDuration(tempAudioPath);
-    // const offset = Math.max(videoDuration - audioDuration, 0).toFixed(2);
-    const offset = 2;
-
-    // console.log(` Video duration: ${videoDuration}s`);
-    // console.log(` Audio duration: ${audioDuration}s`);
-    // console.log(` Trimming first ${offset}s from video...`);
-
     await new Promise((resolve, reject) => {
       ffmpeg()
         .input(mergedPath)
-        // .setStartTime(offset)
         .input(tempAudioPath)
-        // .complexFilter(["[0:a][1:a]amix=inputs=2:duration=shortest[aout]"])
         .outputOptions([
           "-map 0:v:0",
           "-map 1:a:0",
