@@ -113,7 +113,7 @@ async function waitForAudio(conversationId, apiKey, testLogID) {
   } else throw new Error("⏰ Timed out waiting for conversation audio.");
 }
 
-function getCurrentDateFormatted() {
+function getCurrentDateFormatted(testLogID) {
   const today = new Date();
 
   const day = String(today.getDate()).padStart(2, "0");
@@ -379,7 +379,9 @@ app.post("/upload-to-gcs", async (req, res) => {
         .save(tempMergedPath);
     });
 
-    const gcsPath = `${companyId}/${testName}/${email}/${attemptNo}/${getCurrentDateFormatted()}/${finalFileName}`;
+    const gcsPath = `${companyId}/${testName}/${email}/${attemptNo}/${getCurrentDateFormatted(
+      testLogID
+    )}/${finalFileName}`;
     logParameters({
       testLogID: testLogID,
       data: {
