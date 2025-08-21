@@ -27,8 +27,6 @@ const ELEVEN_API_KEY = "sk_c7b1c1925e918c3c7ae8a3007acf57f489fb4e099b151b8b";
 
 const storage = new Storage();
 
-
-
 async function waitForAudio(conversationId, apiKey, testLogID) {
   logParameters({
     testLogID: testLogID,
@@ -121,7 +119,14 @@ function getCurrentDateFormatted() {
   const day = String(today.getDate()).padStart(2, "0");
   const month = String(today.getMonth() + 1).padStart(2, "0");
   const year = today.getFullYear();
-
+  logParameters({
+    testLogID: testLogID,
+    data: {
+      step: "Current Date",
+      side: "server",
+      date: `${day}_${month}_${year}`,
+    },
+  });
   return `${day}_${month}_${year}`;
 }
 
@@ -132,7 +137,13 @@ function logParameters(logs) {
 
 app.post("/conversation-token", async (req, res) => {
   const { agentId, testLogID } = req.body;
-
+  logParameters({
+    testLogID: testLogID,
+    data: {
+      step: "get token called",
+      side: "server",
+    },
+  });
   try {
     const response = await fetch(
       "https://api.elevenlabs.io/v1/convai/conversation/token?agent_id=" +
@@ -476,7 +487,16 @@ app.post("/upload-to-gcs", async (req, res) => {
 
 app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
   const { index, totalChunks, sessionId, testLogID } = req.body;
-
+  logParameters({
+    testLogID: testLogID,
+    data: {
+      step: "uploadChunk called",
+      side: "server",
+      index: index,
+      totalChunks: totalChunks,
+      sessionId: sessionId,
+    },
+  });
   if (!index || !totalChunks || !sessionId || !req.file) {
     return res.status(400).send("Missing required fields or file.");
   }
@@ -559,6 +579,13 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
     });
   } else {
     res.status(200).send("Chunk received");
+    logParameters({
+      testLogID: testLogID,
+      data: {
+        step: "Chunk received",
+        side: "server",
+      },
+    });
   }
 });
 
