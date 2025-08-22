@@ -130,6 +130,72 @@ function getCurrentDateFormatted(testLogID) {
   return `${day}_${month}_${year}`;
 }
 
+async function getSessionInsights(
+  url,
+  email,
+  firstName,
+  lastName,
+  testName,
+  attemptNo,
+  token,
+  persona,
+  testLogID
+) {
+  try {
+    logParameters({
+      testLogID: testLogID,
+      data: {
+        step: "Inside Result API",
+        side: "Client",
+      },
+    });
+    const response = await axios.post(
+      "https://zimulate.me:99/submit-video-google",
+      "",
+      {
+        headers: { "Content-Type": "application/json" },
+        params: {
+          email,
+          firstName,
+          lastName,
+          testName,
+          attempt: attemptNo,
+          companyId: "LTI",
+          googleBucketPath: url,
+          token,
+          model: "gemini-2.5-pro",
+          location: "us-central1",
+          persona: persona,
+        },
+      }
+    );
+
+    if (response.status == 200) {
+      setTestOver(false);
+      setCloseTest(false);
+      setStartSession(false);
+      logParameters({
+        testLogID: testLogID,
+        data: {
+          step: "Results API called successfully",
+          side: "Client",
+          insights: response.data,
+        },
+      });
+    }
+  } catch (error) {
+    console.error(error);
+    logParameters({
+      testLogID: testLogID,
+      data: {
+        step: "Result API call failed",
+        side: "Client",
+        insightsError: error,
+      },
+    });
+  }
+}
+
 function logParameters(logs) {
   const log = JSON.stringify(logs);
   console.log(log);
@@ -223,6 +289,10 @@ app.post("/upload-to-gcs", async (req, res) => {
     videoUrl,
     startTimeStamp,
     testLogID,
+    firstName,
+    lastName,
+    token,
+    persona,
   } = req.body;
 
   try {
@@ -293,6 +363,9 @@ app.post("/upload-to-gcs", async (req, res) => {
     const audioFileName = `audio-${uuidv4()}.mp3`;
     const sanitizedEmail = email.replace(/[@.]/g, "_");
     const finalFileName = `FinalVideo_${sanitizedEmail}_${attemptNo}.webm`;
+    const tempAudioPath = path.join(tempDir, audioFileName);
+    const tempMergedPath = path.join(tempDir, finalFileName);
+
     logParameters({
       testLogID: testLogID,
       data: {
@@ -301,9 +374,6 @@ app.post("/upload-to-gcs", async (req, res) => {
         finalFileName: finalFileName,
       },
     });
-
-    const tempAudioPath = path.join(tempDir, audioFileName);
-    const tempMergedPath = path.join(tempDir, finalFileName);
 
     const convoListRes = await axios.get(
       "https://api.elevenlabs.io/v1/convai/conversations",
@@ -332,7 +402,9 @@ app.post("/upload-to-gcs", async (req, res) => {
       ELEVEN_API_KEY,
       testLogID
     );
+
     fs.writeFileSync(tempAudioPath, audioBuffer);
+
     logParameters({
       testLogID: testLogID,
       data: {
@@ -382,6 +454,7 @@ app.post("/upload-to-gcs", async (req, res) => {
     const gcsPath = `${companyId}/${testName}/${email}/${attemptNo}/${getCurrentDateFormatted(
       testLogID
     )}/${finalFileName}`;
+
     logParameters({
       testLogID: testLogID,
       data: {
@@ -397,6 +470,7 @@ app.post("/upload-to-gcs", async (req, res) => {
     });
 
     const finalVideoUrl = `https://storage.googleapis.com/${BUCKET_NAME}/${gcsPath}`;
+
     logParameters({
       testLogID: testLogID,
       data: {
@@ -468,6 +542,18 @@ app.post("/upload-to-gcs", async (req, res) => {
         finalVideoUrl: finalVideoUrl,
       },
     });
+
+    getSessionInsights(
+      finalVideoUrl,
+      email,
+      firstName,
+      lastName,
+      testName,
+      attemptNo,
+      token,
+      persona,
+      testLogID
+    );
 
     res.json({
       success: true,
