@@ -171,7 +171,6 @@ async function getSessionInsights(
     );
 
     if (response.status == 200) {
-
       logParameters({
         testLogID: testLogID,
         data: {
@@ -590,12 +589,55 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
   const chunkDir = path.join(TMP, ROOT_FOLDER, sessionId, "chunks");
   fs.mkdirSync(chunkDir, { recursive: true });
 
+  logParameters({
+    testLogID: testLogID,
+    data: {
+      step: "dir path",
+      side: "server",
+      "Received chunk": index,
+      chunkDir: chunkDir,
+      totalChunks: totalChunks,
+    },
+  });
+
   const chunkPath = path.join(chunkDir, `chunk_${index}`);
   fs.writeFileSync(chunkPath, req.file.buffer);
 
-  const receivedChunks = fs
+  logParameters({
+    testLogID: testLogID,
+    data: {
+      step: "dir path",
+      side: "server",
+      "Received chunk": index,
+      chunkPath: chunkDir,
+      totalChunks: totalChunks,
+    },
+  });
+
+  // const receivedChunks = fs
+  //   .readdirSync(chunkDir)
+  //   .filter((f) => f.startsWith("chunk_")).length;
+
+  let isAccessible = false;
+  try {
+    fs.accessSync(chunkPath, fs.constants.R_OK);
+    isAccessible = true;
+  } catch (err) {
+    console.error(`❌ Chunk ${index} is not accessible:`, err.message);
+  }
+
+  const chunkFiles = fs
     .readdirSync(chunkDir)
-    .filter((f) => f.startsWith("chunk_")).length;
+    .filter((f) => f.startsWith("chunk_"))
+    .filter((file) => {
+      try {
+        fs.accessSync(path.join(chunkDir, file), fs.constants.R_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+
   logParameters({
     testLogID: testLogID,
     data: {
@@ -605,15 +647,18 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
       sessionId: sessionId,
       receivedChunks: receivedChunks,
       totalChunks: totalChunks,
+      " Saved chunk": `${chunkPath} is Accessible: ${isAccessible}`,
+      chunkList: chunkFiles,
     },
   });
 
-  if (receivedChunks == parseInt(totalChunks)) {
+  if (index + 1 == parseInt(totalChunks)) {
     logParameters({
       testLogID: testLogID,
       data: {
         step: "All chunks received. Starting merge",
         side: "server",
+        condition: `${index + 1} == ${parseInt(totalChunks)}`,
       },
     });
     const chunkFiles = fs
