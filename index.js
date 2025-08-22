@@ -572,7 +572,6 @@ app.post("/upload-to-gcs", async (req, res) => {
 
 app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
   const { index, totalChunks, sessionId, testLogID } = req.body;
-
   logParameters({
     testLogID: testLogID,
     data: {
@@ -710,8 +709,7 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
       res.status(500).send("Failed to merge chunks.");
     });
   } else {
-    // res.status(200).send("Chunk received");
-    res.status(200).json({ message: "Chunk received", index, totalChunks });
+    res.status(200).send("Chunk received");
     logParameters({
       testLogID: testLogID,
       data: {
