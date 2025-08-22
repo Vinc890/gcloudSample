@@ -171,9 +171,7 @@ async function getSessionInsights(
     );
 
     if (response.status == 200) {
-      setTestOver(false);
-      setCloseTest(false);
-      setStartSession(false);
+
       logParameters({
         testLogID: testLogID,
         data: {
