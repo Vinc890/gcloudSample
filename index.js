@@ -614,9 +614,9 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
     },
   });
 
-  // const receivedChunks = fs
-  //   .readdirSync(chunkDir)
-  //   .filter((f) => f.startsWith("chunk_")).length;
+  const receivedChunks = fs
+    .readdirSync(chunkDir)
+    .filter((f) => f.startsWith("chunk_")).length;
 
   let isAccessible = false;
   try {
