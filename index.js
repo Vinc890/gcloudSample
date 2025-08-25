@@ -471,7 +471,7 @@ app.post("/upload-to-gcs", async (req, res) => {
         .save(tempMergedPath);
     });
 
-    const gcsPath = `${companyId}/${testName}/${email}/${attemptNo}/${getCurrentDateFormatted(
+    const gcsPath = `${companyId}/${testName}/${email}/${attemptNo}-${uniqID}/${getCurrentDateFormatted(
       testLogID
     )}/${finalFileName}`;
 
