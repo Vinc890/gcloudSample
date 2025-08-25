@@ -91,12 +91,26 @@ async function waitForAudio(conversationId, apiKey, testLogID) {
           responseType: "arraybuffer",
         }
       );
+      const tranScriptRes = await axios.get(
+        `https://api.elevenlabs.io/v1/convai/conversations/${conversationId}`,
+        {
+          headers: { "xi-api-key": apiKey },
+        }
+      );
       logParameters({
         testLogID: testLogID,
         data: {
           step: "Fetched audio",
           side: "server",
           "Audio fetched successfully.": true,
+        },
+      });
+      logParameters({
+        testLogID: testLogID,
+        data: {
+          step: `Transcript for convoID ${conversationId}`,
+          side: "server",
+          transcript: tranScriptRes.data.transcript.map((el) => el.message),
         },
       });
       return audioRes.data;
@@ -294,7 +308,7 @@ app.post("/upload-to-gcs", async (req, res) => {
 
   try {
     let mergedPath;
-
+    let uniqID = uuidv4();
     logParameters({
       testLogID: testLogID,
       data: {
@@ -304,60 +318,59 @@ app.post("/upload-to-gcs", async (req, res) => {
       },
     });
 
-    if (videoUrl) {
-      logParameters({
-        testLogID: testLogID,
-        data: {
-          step: "Using merged video from URL",
-          side: "server",
-          "Using merged video from URL": videoUrl,
-        },
-      });
-      const tempDir = path.join(__dirname, "temp");
-      if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
-
-      mergedPath = path.join(tempDir, `merged-${sessionId}.webm`);
-      const response = await axios.get(videoUrl, {
-        responseType: "arraybuffer",
-      });
-      fs.writeFileSync(mergedPath, Buffer.from(response.data));
-      logParameters({
-        testLogID: testLogID,
-        data: {
-          step: "Downloaded merged video locally",
-          side: "server",
-          "Downloaded merged video locally": mergedPath,
-        },
-      });
-    } else {
-      const chunkDir = path.join(TMP, ROOT_FOLDER, sessionId, "chunks");
-      mergedPath = path.join(chunkDir, "merged.webm");
-
-      if (!fs.existsSync(mergedPath)) {
-        logParameters({
-          testLogID: testLogID,
-          data: {
-            step: "Merged video not found at",
-            side: "server",
-            "Merged video not found at": mergedPath,
-          },
-        });
-        return res.status(404).json({ error: "Merged video not found." });
-      }
-      logParameters({
-        testLogID: testLogID,
-        data: {
-          step: "Found merged video locally",
-          side: "server",
-          "Found merged video locally": mergedPath,
-        },
-      });
-    }
-
+    // if (videoUrl) {
+    logParameters({
+      testLogID: testLogID,
+      data: {
+        step: "Using merged video from URL",
+        side: "server",
+        "Using merged video from URL": videoUrl,
+      },
+    });
     const tempDir = path.join(__dirname, "temp");
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
 
-    const audioFileName = `audio-${uuidv4()}.mp3`;
+    mergedPath = path.join(tempDir, `merged-${uniqID}.webm`);
+    const response = await axios.get(videoUrl, {
+      responseType: "arraybuffer",
+    });
+    fs.writeFileSync(mergedPath, Buffer.from(response.data));
+    logParameters({
+      testLogID: testLogID,
+      data: {
+        step: "Downloaded merged video locally",
+        side: "server",
+        "Downloaded merged video locally": mergedPath,
+      },
+    });
+    // } else {
+    //   const chunkDir = path.join(TMP, ROOT_FOLDER, sessionId, "chunks");
+    //   mergedPath = path.join(chunkDir, "merged.webm");
+
+    //   if (!fs.existsSync(mergedPath)) {
+    //     logParameters({
+    //       testLogID: testLogID,
+    //       data: {
+    //         step: "Merged video not found at",
+    //         side: "server",
+    //         "Merged video not found at": mergedPath,
+    //       },
+    //     });
+    //     return res.status(404).json({ error: "Merged video not found." });
+    //   }
+    //   logParameters({
+    //     testLogID: testLogID,
+    //     data: {
+    //       step: "Found merged video locally",
+    //       side: "server",
+    //       "Found merged video locally": mergedPath,
+    //     },
+    //   });
+    // }
+
+    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
+
+    const audioFileName = `audio-${uniqID}.mp3`;
     const sanitizedEmail = email.replace(/[@.]/g, "_");
     const finalFileName = `FinalVideo_${sanitizedEmail}_${attemptNo}.webm`;
     const tempAudioPath = path.join(tempDir, audioFileName);
@@ -379,6 +392,15 @@ app.post("/upload-to-gcs", async (req, res) => {
         params: { agent_id: agentId },
       }
     );
+
+    logParameters({
+      testLogID: testLogID,
+      data: {
+        step: `Convo List for agent for ${agentId}`,
+        side: "server",
+        convoListRes: convoListRes.data,
+      },
+    });
 
     const conversationId =
       convoListRes.data?.conversations?.[0]?.conversation_id;
@@ -433,18 +455,19 @@ app.post("/upload-to-gcs", async (req, res) => {
 
           resolve();
         })
-        .on("error", (err) => {
+        .on("error", (err, stdout, stderr) => {
           logParameters({
-            testLogID: testLogID,
+            testLogID,
             data: {
               step: "ffmpeg error",
               side: "server",
-              "ffmpeg error:": err,
+              message: err?.message || "Unknown error",
+              stdout: stdout,
+              stderr: stderr,
             },
           });
-
-          reject(err);
         })
+
         .save(tempMergedPath);
     });
 
