@@ -675,7 +675,7 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
     },
   });
 
-  if (parseInt(index) + 1 == parseInt(totalChunks)) {
+  if (receivedChunks == totalChunks) {
     logParameters({
       testLogID: testLogID,
       data: {
