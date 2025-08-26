@@ -595,16 +595,16 @@ app.post("/upload-to-gcs", async (req, res) => {
 
 // app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
 //   const { index, totalChunks, sessionId, testLogID } = req.body;
-//   logParameters({
-//     testLogID: testLogID,
-//     data: {
-//       step: "uploadChunk called",
-//       side: "server",
-//       index: index,
-//       totalChunks: totalChunks,
-//       sessionId: sessionId,
-//     },
-//   });
+logParameters({
+  testLogID: testLogID,
+  data: {
+    step: "uploadChunk called",
+    side: "server",
+    index: index,
+    totalChunks: totalChunks,
+    sessionId: sessionId,
+  },
+});
 //   if (!index || !totalChunks || !sessionId || !req.file) {
 //     return res.status(400).send("Missing required fields or file.");
 //   }
@@ -626,16 +626,16 @@ app.post("/upload-to-gcs", async (req, res) => {
 //   const chunkPath = path.join(chunkDir, `chunk_${index}`);
 //   fs.writeFileSync(chunkPath, req.file.buffer);
 
-//   logParameters({
-//     testLogID: testLogID,
-//     data: {
-//       step: "dir path",
-//       side: "server",
-//       "Received chunk": index,
-//       chunkPath: chunkDir,
-//       totalChunks: totalChunks,
-//     },
-//   });
+// logParameters({
+//   testLogID: testLogID,
+//   data: {
+//     step: "dir path",
+//     side: "server",
+//     "Received chunk": index,
+//     chunkPath: chunkDir,
+//     totalChunks: totalChunks,
+//   },
+// });
 
 //   const receivedChunks = fs
 //     .readdirSync(chunkDir)
@@ -661,19 +661,19 @@ app.post("/upload-to-gcs", async (req, res) => {
 //       }
 //     });
 
-//   logParameters({
-//     testLogID: testLogID,
-//     data: {
-//       step: "Receiving chunks",
-//       side: "server",
-//       "Received chunk": index,
-//       sessionId: sessionId,
-//       receivedChunks: receivedChunks,
-//       totalChunks: totalChunks,
-//       " Saved chunk": `${chunkPath} is Accessible: ${isAccessible}`,
-//       chunkList: chunkFiles,
-//     },
-//   });
+// logParameters({
+//   testLogID: testLogID,
+//   data: {
+//     step: "Receiving chunks",
+//     side: "server",
+//     "Received chunk": index,
+//     sessionId: sessionId,
+//     receivedChunks: receivedChunks,
+//     totalChunks: totalChunks,
+//     " Saved chunk": `${chunkPath} is Accessible: ${isAccessible}`,
+//     chunkList: chunkFiles,
+//   },
+// });
 
 //   if (receivedChunks == totalChunks) {
 //     logParameters({
@@ -743,11 +743,21 @@ app.post("/upload-to-gcs", async (req, res) => {
 //   }
 // });
 
-
 app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
   const { index, totalChunks, sessionId, testLogID } = req.body;
 
-  if (!index || !totalChunks || !sessionId || !req.file) {
+  logParameters({
+    testLogID: testLogID,
+    data: {
+      step: "uploadChunk called",
+      side: "server",
+      index: index,
+      totalChunks: totalChunks,
+      sessionId: sessionId,
+    },
+  });
+
+  if (index === undefined || !totalChunks || !sessionId || !req.file) {
     return res.status(400).send("Missing required fields or file.");
   }
 
@@ -757,13 +767,11 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
   const chunkPath = path.join(chunkDir, `chunk_${index}`);
   fs.writeFileSync(chunkPath, req.file.buffer);
 
-  // Count how many chunks have been received
   const receivedChunks = fs
     .readdirSync(chunkDir)
     .filter((f) => f.startsWith("chunk_")).length;
 
-  // ✅ Merge only when ALL chunks are present
-  if (receivedChunks === parseInt(totalChunks)) {
+  if (receivedChunks == parseInt(totalChunks)) {
     const chunkFiles = fs
       .readdirSync(chunkDir)
       .filter((f) => f.startsWith("chunk_"))
@@ -772,6 +780,18 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
     const mergedPath = path.join(chunkDir, "merged.webm");
     const writeStream = fs.createWriteStream(mergedPath);
 
+    logParameters({
+      testLogID: testLogID,
+      data: {
+        step: "dir path",
+        side: "server",
+        "Received chunk index": index,
+        receivedChunks: receivedChunks,
+        chunkPath: chunkDir,
+        totalChunks: totalChunks,
+      },
+    });
+
     for (const file of chunkFiles) {
       const buffer = fs.readFileSync(path.join(chunkDir, file));
       writeStream.write(buffer);
@@ -779,16 +799,20 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
     writeStream.end();
 
     writeStream.on("finish", async () => {
-      const gcsPath = `${ROOT_FOLDER}/${sessionId}/Video/merged.webm`;
-      await storage.bucket(SESSION_BUCKET).upload(mergedPath, {
-        destination: gcsPath,
-        contentType: "video/webm",
-      });
+      try {
+        const gcsPath = `${ROOT_FOLDER}/${sessionId}/Video/merged.webm`;
+        await storage.bucket(SESSION_BUCKET).upload(mergedPath, {
+          destination: gcsPath,
+          contentType: "video/webm",
+        });
 
-      res.status(200).json({
-        message: "Chunks uploaded and video merged.",
-        videoUrl: `https://storage.googleapis.com/${SESSION_BUCKET}/${gcsPath}`,
-      });
+        res.status(200).json({
+          message: "Chunks uploaded and video merged.",
+          videoUrl: `https://storage.googleapis.com/${SESSION_BUCKET}/${gcsPath}`,
+        });
+      } catch (err) {
+        res.status(500).send({ message: "Failed to upload merged video." });
+      }
     });
 
     writeStream.on("error", (err) => {
@@ -798,7 +822,6 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
     res.status(200).json({ message: "Chunk received" });
   }
 });
-
 
 app.post("/log", (req, res) => {
   const params = req.body;
