@@ -595,16 +595,16 @@ app.post("/upload-to-gcs", async (req, res) => {
 
 // app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
 //   const { index, totalChunks, sessionId, testLogID } = req.body;
-logParameters({
-  testLogID: testLogID,
-  data: {
-    step: "uploadChunk called",
-    side: "server",
-    index: index,
-    totalChunks: totalChunks,
-    sessionId: sessionId,
-  },
-});
+// logParameters({
+//   testLogID: testLogID,
+//   data: {
+//     step: "uploadChunk called",
+//     side: "server",
+//     index: index,
+//     totalChunks: totalChunks,
+//     sessionId: sessionId,
+//   },
+// });
 //   if (!index || !totalChunks || !sessionId || !req.file) {
 //     return res.status(400).send("Missing required fields or file.");
 //   }
