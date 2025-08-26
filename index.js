@@ -729,10 +729,10 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
           "Failed to merge chunks:": err,
         },
       });
-      res.status(500).send("Failed to merge chunks.");
+      res.status(500).send({ message: "Failed to merge chunks." });
     });
   } else {
-    res.status(200).send("Chunk received");
+    res.status(200).send({ message: "Chunk received" });
     logParameters({
       testLogID: testLogID,
       data: {
