@@ -595,16 +595,16 @@ app.post("/upload-to-gcs", async (req, res) => {
 
 app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
   const { index, totalChunks, sessionId, testLogID } = req.body;
-logParameters({
-  testLogID: testLogID,
-  data: {
-    step: "uploadChunk called",
-    side: "server",
-    index: index,
-    totalChunks: totalChunks,
-    sessionId: sessionId,
-  },
-});
+  logParameters({
+    testLogID: testLogID,
+    data: {
+      step: "uploadChunk called",
+      side: "server",
+      index: index,
+      totalChunks: totalChunks,
+      sessionId: sessionId,
+    },
+  });
   if (!index || !totalChunks || !sessionId || !req.file) {
     return res.status(400).send("Missing required fields or file.");
   }
@@ -626,16 +626,16 @@ logParameters({
   const chunkPath = path.join(chunkDir, `chunk_${index}`);
   fs.writeFileSync(chunkPath, req.file.buffer);
 
-logParameters({
-  testLogID: testLogID,
-  data: {
-    step: "dir path",
-    side: "server",
-    "Received chunk": index,
-    chunkPath: chunkDir,
-    totalChunks: totalChunks,
-  },
-});
+  logParameters({
+    testLogID: testLogID,
+    data: {
+      step: "dir path",
+      side: "server",
+      "Received chunk": index,
+      chunkPath: chunkDir,
+      totalChunks: totalChunks,
+    },
+  });
 
   const receivedChunks = fs
     .readdirSync(chunkDir)
@@ -661,27 +661,27 @@ logParameters({
       }
     });
 
-logParameters({
-  testLogID: testLogID,
-  data: {
-    step: "Receiving chunks",
-    side: "server",
-    "Received chunk": index,
-    sessionId: sessionId,
-    receivedChunks: receivedChunks,
-    totalChunks: totalChunks,
-    " Saved chunk": `${chunkPath} is Accessible: ${isAccessible}`,
-    chunkList: chunkFiles,
-  },
-});
+  logParameters({
+    testLogID: testLogID,
+    data: {
+      step: "Receiving chunks",
+      side: "server",
+      "Received chunk": index,
+      sessionId: sessionId,
+      receivedChunks: receivedChunks,
+      totalChunks: totalChunks,
+      " Saved chunk": `${chunkPath} is Accessible: ${isAccessible}`,
+      chunkList: chunkFiles,
+    },
+  });
 
-  if (receivedChunks == totalChunks) {
+  if (parseInt(index) + 1 == parseInt(totalChunks)) {
     logParameters({
       testLogID: testLogID,
       data: {
         step: "All chunks received. Starting merge",
         side: "server",
-        condition: `${index + 1} == ${parseInt(totalChunks)}`,
+        condition: `${parseInt(index) + 1} == ${parseInt(totalChunks)}`,
       },
     });
     const chunkFiles = fs
