@@ -207,9 +207,16 @@ async function getSessionInsights(
   }
 }
 
-function logParameters(logs) {
-  const log = JSON.stringify(logs);
-  console.log(log);
+async function logParameters(params) {
+  try {
+    const response = await axios.post(
+      "https://cloud-run-logger-953332685815.asia-south1.run.app/log",
+      params
+    );
+    console.log("Response from server:", response.data);
+  } catch (error) {
+    console.error("Error sending log parameters:", error.message);
+  }
 }
 
 app.post("/conversation-token", async (req, res) => {
