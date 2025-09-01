@@ -762,85 +762,125 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
   }
 });
 
-// app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
-//   const { index, totalChunks, sessionId, testLogID } = req.body;
+app.post("/uploadChunk1", chunkUpload.single("chunk"), async (req, res) => {
+  const { index, sessionId, testLogID } = req.body;
+  logParameters({
+    testLogID: testLogID,
+    data: {
+      step: "uploadChunk called",
+      side: "server",
+      index: index,
+      sessionId: sessionId,
+    },
+  });
+  if (!index || !sessionId || !req.file) {
+    return res.status(400).send("Missing required fields or file.");
+  }
 
-//   logParameters({
-//     testLogID: testLogID,
-//     data: {
-//       step: "uploadChunk called",
-//       side: "server",
-//       index: index,
-//       totalChunks: totalChunks,
-//       sessionId: sessionId,
-//     },
-//   });
+  const chunkDir = path.join(TMP, ROOT_FOLDER, sessionId, "chunks");
+  fs.mkdirSync(chunkDir, { recursive: true });
+  const chunkPath = path.join(chunkDir, `chunk_${index}`);
+  fs.writeFileSync(chunkPath, req.file.buffer);
 
-//   if (index === undefined || !totalChunks || !sessionId || !req.file) {
-//     return res.status(400).send("Missing required fields or file.");
-//   }
+  logParameters({
+    testLogID: testLogID,
+    data: {
+      step: "Received Chunk",
+      side: "server",
+      index: index,
+      sessionId: sessionId,
+      chunkDir: chunkDir,
+      chunkPath: chunkPath,
+    },
+  });
 
-//   const chunkDir = path.join(TMP, ROOT_FOLDER, sessionId, "chunks");
-//   fs.mkdirSync(chunkDir, { recursive: true });
+  res.status(200).send({ message: `Chunk ${index} received` });
+});
 
-//   const chunkPath = path.join(chunkDir, `chunk_${index}`);
-//   fs.writeFileSync(chunkPath, req.file.buffer);
+app.post("/finalizeUpload1", async (req, res) => {
+  const { sessionId } = req.body;
+  logParameters({
+    testLogID: testLogID,
+    data: {
+      step: "Finalize Chunks",
+      side: "server",
+      sessionId: sessionId,
+    },
+  });
+  if (!sessionId) {
+    return res.status(400).send("Missing sessionId");
+  }
 
-//   const receivedChunks = fs
-//     .readdirSync(chunkDir)
-//     .filter((f) => f.startsWith("chunk_")).length;
+  const chunkDir = path.join(TMP, ROOT_FOLDER, sessionId, "chunks");
+  const chunkFiles = fs
+    .readdirSync(chunkDir)
+    .filter((f) => f.startsWith("chunk_"))
+    .sort((a, b) => parseInt(a.split("_")[1]) - parseInt(b.split("_")[1]));
 
-//   if (receivedChunks == parseInt(totalChunks)) {
-//     const chunkFiles = fs
-//       .readdirSync(chunkDir)
-//       .filter((f) => f.startsWith("chunk_"))
-//       .sort((a, b) => parseInt(a.split("_")[1]) - parseInt(b.split("_")[1]));
+  const mergedPath = path.join(chunkDir, "merged.webm");
+  const writeStream = fs.createWriteStream(mergedPath);
 
-//     const mergedPath = path.join(chunkDir, "merged.webm");
-//     const writeStream = fs.createWriteStream(mergedPath);
+  logParameters({
+    testLogID: testLogID,
+    data: {
+      step: "Finalizing Chunks",
+      side: "server",
+      sessionId: sessionId,
+      chunkDir: chunkDir,
+      chunkFiles: chunkFiles,
+      mergedPath: mergedPath,
+    },
+  });
 
-//     logParameters({
-//       testLogID: testLogID,
-//       data: {
-//         step: "dir path",
-//         side: "server",
-//         "Received chunk index": index,
-//         receivedChunks: receivedChunks,
-//         chunkPath: chunkDir,
-//         totalChunks: totalChunks,
-//       },
-//     });
+  for (const file of chunkFiles) {
+    logParameters({
+      testLogID: testLogID,
+      data: {
+        step: "Finalizing Chunks Loop",
+        side: "server",
+        sessionId: sessionId,
+      },
+    });
+    const buffer = fs.readFileSync(path.join(chunkDir, file));
+    writeStream.write(buffer);
+  }
+  writeStream.end();
 
-//     for (const file of chunkFiles) {
-//       const buffer = fs.readFileSync(path.join(chunkDir, file));
-//       writeStream.write(buffer);
-//     }
-//     writeStream.end();
+  writeStream.on("finish", async () => {
+    const gcsPath = `${ROOT_FOLDER}/${sessionId}/Video/merged.webm`;
+    await storage.bucket(SESSION_BUCKET).upload(mergedPath, {
+      destination: gcsPath,
+      contentType: "video/webm",
+    });
+    logParameters({
+      testLogID: testLogID,
+      data: {
+        step: "Finalized Chunks",
+        side: "server",
+        sessionId: sessionId,
+        gcsPath: gcsPath,
+      },
+    });
+    res.status(200).json({
+      message: "Video finalized and uploaded",
+      videoUrl: `https://storage.googleapis.com/${SESSION_BUCKET}/${gcsPath}`,
+    });
+  });
 
-//     writeStream.on("finish", async () => {
-//       try {
-//         const gcsPath = `${ROOT_FOLDER}/${sessionId}/Video/merged.webm`;
-//         await storage.bucket(SESSION_BUCKET).upload(mergedPath, {
-//           destination: gcsPath,
-//           contentType: "video/webm",
-//         });
-
-//         res.status(200).json({
-//           message: "Chunks uploaded and video merged.",
-//           videoUrl: `https://storage.googleapis.com/${SESSION_BUCKET}/${gcsPath}`,
-//         });
-//       } catch (err) {
-//         res.status(500).send({ message: "Failed to upload merged video." });
-//       }
-//     });
-
-//     writeStream.on("error", (err) => {
-//       res.status(500).send({ message: "Failed to merge chunks." });
-//     });
-//   } else {
-//     res.status(200).json({ message: "Chunk received" });
-//   }
-// });
+  writeStream.on("error", (err) => {
+    logParameters({
+      testLogID: testLogID,
+      data: {
+        step: "Finalized Chunks failed",
+        side: "server",
+        sessionId: sessionId,
+        err: err,
+      },
+    });
+    console.error("❌ Merge error:", err);
+    res.status(500).send({ message: "Failed to merge chunks" });
+  });
+});
 
 app.post("/log", (req, res) => {
   const params = req.body;
