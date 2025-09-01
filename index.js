@@ -639,7 +639,8 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
       step: "dir path",
       side: "server",
       "Received chunk": index,
-      chunkPath: chunkDir,
+      chunkDir: chunkDir,
+      chunkPath: chunkPath,
       totalChunks: totalChunks,
     },
   });
@@ -656,14 +657,24 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
     console.error(`❌ Chunk ${index} is not accessible:`, err.message);
   }
 
-  const chunkFiles = fs
-    .readdirSync(chunkDir)
+  const allFiles = fs.readdirSync(chunkDir);
+
+  const chunkFiles = allFiles
     .filter((f) => f.startsWith("chunk_"))
     .filter((file) => {
       try {
         fs.accessSync(path.join(chunkDir, file), fs.constants.R_OK);
         return true;
       } catch {
+        logParameters({
+          testLogID: testLogID,
+          data: {
+            step: "Failed chunks",
+            side: "server",
+            sessionId: sessionId,
+            file: file,
+          },
+        });
         return false;
       }
     });
@@ -679,6 +690,7 @@ app.post("/uploadChunk", chunkUpload.single("chunk"), async (req, res) => {
       totalChunks: totalChunks,
       " Saved chunk": `${chunkPath} is Accessible: ${isAccessible}`,
       chunkList: chunkFiles,
+      allFiles: allFiles,
     },
   });
 
