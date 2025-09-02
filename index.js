@@ -14,10 +14,12 @@ const ffmpeg = require("fluent-ffmpeg");
 const PORT = 3000;
 
 const app = express();
+
+app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
-app.use(cors());
 const chunkUpload = multer({ storage: multer.memoryStorage() });
+const upload = multer();
 
 const TMP = "/tmp";
 const SESSION_BUCKET = "zimulate";
@@ -883,75 +885,34 @@ app.post("/finalizeUpload1", async (req, res) => {
   });
 });
 
-app.post("/uploadChunk2", chunkUpload.single("chunk"), async (req, res) => {
-  const { testLogID, index, sessionId } = req.body;
-
+app.post("/uploadChunk2", upload.single("chunk"), async (req, res) => {
   try {
-    logParameters({
-      testLogID: testLogID,
-      data: {
-        step: "uploadChunk called",
-        side: "server",
-        index: index,
-        sessionId: sessionId,
-      },
-    });
-    if (
-      index === undefined ||
-      index === null ||
-      !sessionId ||
-      !req.files?.chunk
-    ) {
+    console.log("📥 Incoming upload request:");
+    console.log("req.body:", req.body);
+    console.log("req.file:", req.file);
+
+    const { testLogID, index, sessionId } = req.body;
+    const file = req.file;
+
+    if (!index || !sessionId || !file) {
+      console.error("❌ Missing:", { index, sessionId, file });
       return res.status(400).send("Missing required fields or file.");
     }
-    // const file = req.files.chunk;
-    const file = Array.isArray(req.files.chunk)
-      ? req.files.chunk[0]
-      : req.files.chunk;
 
     const bucket = storage.bucket(SESSION_BUCKET);
-    // const destination = `${ROOT_FOLDER}/${sessionId}/chunks/${index}.webm`;
-    const paddedIndex = String(index).padStart(6, "0");
-    const destination = `${ROOT_FOLDER}/${sessionId}/chunks/${paddedIndex}.webm`;
+    const destination = `${ROOT_FOLDER}/${sessionId}/chunks/${index}.webm`;
 
-    logParameters({
-      testLogID: testLogID,
-      data: {
-        step: "Chunk address",
-        side: "server",
-        index: index,
-        sessionId: sessionId,
-        destination: destination,
-      },
-    });
-
-    await bucket.file(destination).save(file.data, {
+    await bucket.file(destination).save(file.buffer, {
       resumable: false,
       contentType: "video/webm",
     });
-    logParameters({
-      testLogID: testLogID,
-      data: {
-        step: "Chunk Saved",
-        side: "server",
-        index: index,
-        sessionId: sessionId,
-        destination: destination,
-      },
-    });
+
     res.json({ success: true, path: destination });
   } catch (err) {
-    logParameters({
-      testLogID: testLogID,
-      data: {
-        step: "Failed to upload chunk",
-        side: "server",
-        index: index,
-        sessionId: sessionId,
-        err: err,
-      },
-    });
-    res.status(500).json({ error: "Chunk upload failed" });
+    console.error("❌ Upload error:", err);
+    res
+      .status(500)
+      .json({ error: "Chunk upload failed", details: err.message });
   }
 });
 
