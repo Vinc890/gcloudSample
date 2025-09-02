@@ -884,11 +884,11 @@ app.post("/finalizeUpload1", async (req, res) => {
 });
 
 app.post("/uploadChunk2", async (req, res) => {
-  const { index, sessionId } = req.body;
+  const { testLogID, index, sessionId } = req.body;
 
   try {
     logParameters({
-      // testLogID: testLogID,
+      testLogID: testLogID,
       data: {
         step: "uploadChunk called",
         side: "server",
@@ -915,7 +915,7 @@ app.post("/uploadChunk2", async (req, res) => {
     const destination = `${ROOT_FOLDER}/${sessionId}/chunks/${paddedIndex}.webm`;
 
     logParameters({
-      // testLogID: testLogID,
+      testLogID: testLogID,
       data: {
         step: "Chunk address",
         side: "server",
@@ -930,7 +930,7 @@ app.post("/uploadChunk2", async (req, res) => {
       contentType: "video/webm",
     });
     logParameters({
-      // testLogID: testLogID,
+      testLogID: testLogID,
       data: {
         step: "Chunk Saved",
         side: "server",
@@ -942,7 +942,7 @@ app.post("/uploadChunk2", async (req, res) => {
     res.json({ success: true, path: destination });
   } catch (err) {
     logParameters({
-      // testLogID: testLogID,
+      testLogID: testLogID,
       data: {
         step: "Failed to upload chunk",
         side: "server",
