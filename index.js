@@ -907,6 +907,13 @@ app.post("/uploadChunk2", upload.single("chunk"), async (req, res) => {
 
     res.json({ success: true, path: filePath });
   } catch (err) {
+    logParameters({
+      data: {
+        step: "Chunks Fail",
+        side: "server",
+        err: err,
+      },
+    });
     console.error("❌ uploadChunk2 error", err);
     res.status(500).json({ error: "Failed to upload chunk" });
   }
@@ -976,7 +983,10 @@ app.post("/finalizeUpload2", async (req, res) => {
       throw new Error("No chunks found to merge.");
     }
 
-    console.log("📼 Found chunk files:", chunkFiles.map((f) => f.name));
+    console.log(
+      "📼 Found chunk files:",
+      chunkFiles.map((f) => f.name)
+    );
 
     // GCS compose API only allows up to 32 files
     if (chunkFiles.length > 32) {
@@ -1075,11 +1085,17 @@ app.post("/finalizeUpload2", async (req, res) => {
 
     res.json({ success: true, jobId: operation.name });
   } catch (err) {
+    logParameters({
+      data: {
+        step: "Finalize Fail",
+        side: "server",
+        err: err,
+      },
+    });
     console.error("❌ Finalize failed with error:", err);
     res.status(500).json({ error: "Failed to finalize upload" });
   }
 });
-
 
 app.post("/gcs-event", async (req, res) => {
   const message = JSON.parse(
