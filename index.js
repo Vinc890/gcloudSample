@@ -10,6 +10,7 @@ const { google } = require("googleapis");
 const axios = require("axios");
 const { v4: uuidv4 } = require("uuid");
 const ffmpeg = require("fluent-ffmpeg");
+const { TranscoderServiceClient } = require("@google-cloud/video-transcoder");
 
 const PORT = 3000;
 
@@ -29,6 +30,7 @@ const ELEVEN_API_KEY = "sk_c7b1c1925e918c3c7ae8a3007acf57f489fb4e099b151b8b";
 const PROJECT_ID = "contactaiassessments";
 const LOCATION = "asia-south1";
 const storage = new Storage();
+const transcoderServiceClient = new TranscoderServiceClient();
 
 async function waitForAudio(conversationId, apiKey, testLogID) {
   logParameters({
@@ -887,70 +889,48 @@ app.post("/finalizeUpload1", async (req, res) => {
 
 app.post("/uploadChunk2", upload.single("chunk"), async (req, res) => {
   try {
-    console.log("📥 Incoming upload request:");
-    console.log("req.body:", req.body);
-    console.log("req.file:", req.file);
-
-    const { testLogID, index, sessionId } = req.body;
-    const file = req.file;
-
-    if (!index || !sessionId || !file) {
-      console.error("❌ Missing:", { index, sessionId, file });
-      return res.status(400).send("Missing required fields or file.");
+    const { sessionId, index } = req.body;
+    if (!req.file || !sessionId || !index) {
+      return res
+        .status(400)
+        .json({ error: "Missing required fields or file." });
     }
 
     const bucket = storage.bucket(SESSION_BUCKET);
-    const destination = `${ROOT_FOLDER}/${sessionId}/chunks/chunk_${index}.webm`;
+    const filePath = `${ROOT_FOLDER}/${sessionId}/chunks/chunk_${index}.webm`;
 
-    await bucket.file(destination).save(file.buffer, {
-      resumable: false,
+    await bucket.file(filePath).save(req.file.buffer, {
       contentType: "video/webm",
     });
 
-    res.json({ success: true, path: destination });
+    console.log(`✅ Uploaded chunk ${index} for session ${sessionId}`);
+
+    res.json({ success: true, path: filePath });
   } catch (err) {
-    console.error("❌ Upload error:", err);
-    res
-      .status(500)
-      .json({ error: "Chunk upload failed", details: err.message });
+    console.error("❌ uploadChunk2 error", err);
+    res.status(500).json({ error: "Failed to upload chunk" });
   }
 });
 
 app.post("/finalizeUpload2", async (req, res) => {
-  const {
-    companyId,
-    testName,
-    email,
-    attemptNo,
-    agentId,
-    sessionId,
-    testLogID,
-    firstName,
-    lastName,
-    token,
-    persona,
-  } = req.body;
   try {
-    logParameters({
-      testLogID: testLogID,
-      data: {
-        step: "Inside Finalize chunk",
-        side: "server",
-        body: {
-          companyId,
-          testName,
-          email,
-          attemptNo,
-          agentId,
-          sessionId,
-          testLogID,
-          firstName,
-          lastName,
-          token,
-          persona,
-        },
-      },
-    });
+    const {
+      companyId,
+      testName,
+      email,
+      attemptNo,
+      agentId,
+      sessionId,
+      testLogID,
+      firstName,
+      lastName,
+      token,
+      persona,
+    } = req.body;
+
+    const bucket = storage.bucket(SESSION_BUCKET);
+
+    // ✅ Save ElevenLabs audio to bucket
     const convoListRes = await axios.get(
       "https://api.elevenlabs.io/v1/convai/conversations",
       {
@@ -958,15 +938,6 @@ app.post("/finalizeUpload2", async (req, res) => {
         params: { agent_id: agentId },
       }
     );
-
-    logParameters({
-      testLogID: testLogID,
-      data: {
-        step: "Got convo list",
-        side: "server",
-        convoListRes: convoListRes,
-      },
-    });
 
     const conversationId =
       convoListRes.data?.conversations?.[0]?.conversation_id;
@@ -979,21 +950,12 @@ app.post("/finalizeUpload2", async (req, res) => {
     );
 
     const audioPath = `${ROOT_FOLDER}/${sessionId}/audio/audio.webm`;
-    const bucket = storage.bucket(SESSION_BUCKET);
     await bucket
       .file(audioPath)
       .save(audioBuffer, { contentType: "audio/webm" });
 
-    logParameters({
-      testLogID: testLogID,
-      data: {
-        step: "audio to bucket",
-        side: "server",
-        audioPath: audioPath,
-      },
-    });
-
-    const [operation] = await transcoderServiceClient.createJob({
+    // ✅ Prepare Transcoder Job Config
+    const jobConfig = {
       parent: `projects/${PROJECT_ID}/locations/${LOCATION}`,
       job: {
         inputAttachments: [
@@ -1003,7 +965,7 @@ app.post("/finalizeUpload2", async (req, res) => {
           },
           {
             key: "audio-input",
-            uri: `gs://${SESSION_BUCKET}/${ROOT_FOLDER}/${sessionId}/audio/audio.webm`,
+            uri: `gs://${SESSION_BUCKET}/${audioPath}`,
           },
         ],
         elementaryStreams: [
@@ -1028,17 +990,28 @@ app.post("/finalizeUpload2", async (req, res) => {
         ],
         outputUri: `gs://${SESSION_BUCKET}/${ROOT_FOLDER}/${sessionId}/Video/`,
       },
-    });
+    };
 
-    logParameters({
-      testLogID: testLogID,
-      data: {
-        step: "Job created",
-        side: "server",
-        audioPath: audioPath,
-      },
-    });
+    // ✅ Log job request before sending
+    console.log(
+      "📦 Creating Transcoder job with config:",
+      JSON.stringify(jobConfig, null, 2)
+    );
 
+    // ✅ Call Transcoder API
+    let operation;
+    try {
+      [operation] = await transcoderServiceClient.createJob(jobConfig);
+      console.log("✅ Transcoder job created successfully:", operation.name);
+    } catch (err) {
+      console.error(
+        "❌ Transcoder job creation failed:",
+        err.errors || err.message || err
+      );
+      throw err; // rethrow to hit outer catch
+    }
+
+    // ✅ Save metadata.json
     const metaPath = `${ROOT_FOLDER}/${sessionId}/metadata.json`;
     await bucket.file(metaPath).save(
       JSON.stringify(
@@ -1063,25 +1036,11 @@ app.post("/finalizeUpload2", async (req, res) => {
       { contentType: "application/json" }
     );
 
-    logParameters({
-      testLogID: testLogID,
-      data: {
-        step: "Saving metaData",
-        side: "server",
-        metaPath: metaPath,
-      },
-    });
+    console.log("📝 Metadata saved:", metaPath);
 
     res.json({ success: true, jobId: operation.name });
   } catch (err) {
-    logParameters({
-      testLogID: testLogID,
-      data: {
-        step: "Finalize failed",
-        side: "server",
-        err: err,
-      },
-    });
+    console.error("❌ Finalize failed with error:", err);
     res.status(500).json({ error: "Failed to finalize upload" });
   }
 });
