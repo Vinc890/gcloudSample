@@ -900,7 +900,7 @@ app.post("/uploadChunk2", upload.single("chunk"), async (req, res) => {
     }
 
     const bucket = storage.bucket(SESSION_BUCKET);
-    const destination = `${ROOT_FOLDER}/${sessionId}/chunks/${index}.webm`;
+    const destination = `${ROOT_FOLDER}/${sessionId}/chunks/chunk_${index}.webm`;
 
     await bucket.file(destination).save(file.buffer, {
       resumable: false,
@@ -917,20 +917,20 @@ app.post("/uploadChunk2", upload.single("chunk"), async (req, res) => {
 });
 
 app.post("/finalizeUpload2", async (req, res) => {
+  const {
+    companyId,
+    testName,
+    email,
+    attemptNo,
+    agentId,
+    sessionId,
+    testLogID,
+    firstName,
+    lastName,
+    token,
+    persona,
+  } = req.body;
   try {
-    const {
-      companyId,
-      testName,
-      email,
-      attemptNo,
-      agentId,
-      sessionId,
-      testLogID,
-      firstName,
-      lastName,
-      token,
-      persona,
-    } = req.body;
     logParameters({
       testLogID: testLogID,
       data: {
