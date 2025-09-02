@@ -24,7 +24,8 @@ const SESSION_BUCKET = "zimulate";
 const BUCKET_NAME = "zimulate";
 const ROOT_FOLDER = "sessions";
 const ELEVEN_API_KEY = "sk_c7b1c1925e918c3c7ae8a3007acf57f489fb4e099b151b8b";
-
+const PROJECT_ID = "contactaiassessments";
+const LOCATION = "asia-south1";
 const storage = new Storage();
 
 async function waitForAudio(conversationId, apiKey, testLogID) {
@@ -880,6 +881,293 @@ app.post("/finalizeUpload1", async (req, res) => {
     console.error("❌ Merge error:", err);
     res.status(500).send({ message: "Failed to merge chunks" });
   });
+});
+
+app.post("/uploadChunk2", async (req, res) => {
+  try {
+    const { testLogID, index, sessionId } = req.body;
+    logParameters({
+      testLogID: testLogID,
+      data: {
+        step: "uploadChunk called",
+        side: "server",
+        index: index,
+        sessionId: sessionId,
+      },
+    });
+    if (
+      index === undefined ||
+      index === null ||
+      !sessionId ||
+      !req.files?.chunk
+    ) {
+      return res.status(400).send("Missing required fields or file.");
+    }
+    // const file = req.files.chunk;
+    const file = Array.isArray(req.files.chunk)
+      ? req.files.chunk[0]
+      : req.files.chunk;
+
+    const bucket = storage.bucket(SESSION_BUCKET);
+    // const destination = `${ROOT_FOLDER}/${sessionId}/chunks/${index}.webm`;
+    const paddedIndex = String(index).padStart(6, "0");
+    const destination = `${ROOT_FOLDER}/${sessionId}/chunks/${paddedIndex}.webm`;
+
+    logParameters({
+      testLogID: testLogID,
+      data: {
+        step: "Chunk address",
+        side: "server",
+        index: index,
+        sessionId: sessionId,
+        destination: destination,
+      },
+    });
+
+    await bucket.file(destination).save(file.data, {
+      resumable: false,
+      contentType: "video/webm",
+    });
+    logParameters({
+      testLogID: testLogID,
+      data: {
+        step: "Chunk Saved",
+        side: "server",
+        index: index,
+        sessionId: sessionId,
+        destination: destination,
+      },
+    });
+    res.json({ success: true, path: destination });
+  } catch (err) {
+    logParameters({
+      testLogID: testLogID,
+      data: {
+        step: "Failed to upload chunk",
+        side: "server",
+        index: index,
+        sessionId: sessionId,
+        err: err,
+      },
+    });
+    res.status(500).json({ error: "Chunk upload failed" });
+  }
+});
+
+app.post("/finalizeUpload2", async (req, res) => {
+  try {
+    const {
+      companyId,
+      testName,
+      email,
+      attemptNo,
+      agentId,
+      sessionId,
+      testLogID,
+      firstName,
+      lastName,
+      token,
+      persona,
+    } = req.body;
+    logParameters({
+      testLogID: testLogID,
+      data: {
+        step: "Inside Finalize chunk",
+        side: "server",
+        body: {
+          companyId,
+          testName,
+          email,
+          attemptNo,
+          agentId,
+          sessionId,
+          testLogID,
+          firstName,
+          lastName,
+          token,
+          persona,
+        },
+      },
+    });
+    const convoListRes = await axios.get(
+      "https://api.elevenlabs.io/v1/convai/conversations",
+      {
+        headers: { "xi-api-key": ELEVEN_API_KEY },
+        params: { agent_id: agentId },
+      }
+    );
+
+    logParameters({
+      testLogID: testLogID,
+      data: {
+        step: "Got convo list",
+        side: "server",
+        convoListRes: convoListRes,
+      },
+    });
+
+    const conversationId =
+      convoListRes.data?.conversations?.[0]?.conversation_id;
+    if (!conversationId) throw new Error("No conversation found.");
+
+    const audioBuffer = await waitForAudio(
+      conversationId,
+      ELEVEN_API_KEY,
+      testLogID
+    );
+
+    const audioPath = `${ROOT_FOLDER}/${sessionId}/audio/audio.webm`;
+    const bucket = storage.bucket(SESSION_BUCKET);
+    await bucket
+      .file(audioPath)
+      .save(audioBuffer, { contentType: "audio/webm" });
+
+    logParameters({
+      testLogID: testLogID,
+      data: {
+        step: "audio to bucket",
+        side: "server",
+        audioPath: audioPath,
+      },
+    });
+
+    const [operation] = await transcoderServiceClient.createJob({
+      parent: `projects/${PROJECT_ID}/locations/${LOCATION}`,
+      job: {
+        inputAttachments: [
+          {
+            key: "video-input",
+            uri: `gs://${SESSION_BUCKET}/${ROOT_FOLDER}/${sessionId}/chunks/*`,
+          },
+          {
+            key: "audio-input",
+            uri: `gs://${SESSION_BUCKET}/${ROOT_FOLDER}/${sessionId}/audio/audio.webm`,
+          },
+        ],
+        elementaryStreams: [
+          {
+            key: "video-stream",
+            videoStream: { codec: "vp9" },
+            inputKey: "video-input",
+          },
+          {
+            key: "audio-stream",
+            audioStream: { codec: "opus" },
+            inputKey: "audio-input",
+          },
+        ],
+        muxStreams: [
+          {
+            key: "final-stream",
+            container: "webm",
+            elementaryStreams: ["video-stream", "audio-stream"],
+            fileName: "final.webm",
+          },
+        ],
+        outputUri: `gs://${SESSION_BUCKET}/${ROOT_FOLDER}/${sessionId}/Video/`,
+      },
+    });
+
+    logParameters({
+      testLogID: testLogID,
+      data: {
+        step: "Job created",
+        side: "server",
+        audioPath: audioPath,
+      },
+    });
+
+    const metaPath = `${ROOT_FOLDER}/${sessionId}/metadata.json`;
+    await bucket.file(metaPath).save(
+      JSON.stringify(
+        {
+          companyId,
+          testName,
+          email,
+          attemptNo,
+          agentId,
+          testLogID,
+          firstName,
+          lastName,
+          token,
+          persona,
+          sessionId,
+          jobId: operation.name,
+          status: "processing",
+        },
+        null,
+        2
+      ),
+      { contentType: "application/json" }
+    );
+
+    logParameters({
+      testLogID: testLogID,
+      data: {
+        step: "Saving metaData",
+        side: "server",
+        metaPath: metaPath,
+      },
+    });
+
+    res.json({ success: true, jobId: operation.name });
+  } catch (err) {
+    logParameters({
+      testLogID: testLogID,
+      data: {
+        step: "Finalize failed",
+        side: "server",
+        err: err,
+      },
+    });
+    res.status(500).json({ error: "Failed to finalize upload" });
+  }
+});
+
+app.post("/gcs-event", async (req, res) => {
+  const message = JSON.parse(
+    Buffer.from(req.body.message.data, "base64").toString()
+  );
+
+  const { bucket, name } = message;
+  if (!name.endsWith("Video/final.webm")) return res.status(200).send();
+
+  const sessionId = name.split("/")[1];
+  const metaPath = `${ROOT_FOLDER}/${sessionId}/metadata.json`;
+  const [contents] = await storage.bucket(bucket).file(metaPath).download();
+  const meta = JSON.parse(contents.toString());
+  const finalVideoUrl = `https://storage.googleapis.com/${bucket}/${name}`;
+
+  await getSessionInsights(
+    finalVideoUrl,
+    meta.email,
+    meta.firstName,
+    meta.lastName,
+    meta.testName,
+    meta.attemptNo,
+    meta.token,
+    meta.persona,
+    meta.testLogID
+  );
+  meta.status = "done";
+  meta.finalVideoUrl = `https://storage.googleapis.com/${bucket}/${name}`;
+  await storage
+    .bucket(bucket)
+    .file(metaPath)
+    .save(JSON.stringify(meta, null, 2), {
+      contentType: "application/json",
+    });
+
+  logParameters({
+    testLogID: meta.testLogID,
+    data: {
+      step: "INsights called",
+      side: "server",
+      finalVideoUrl: meta.finalVideoUrl,
+    },
+  });
+
+  res.status(200).send();
 });
 
 app.post("/log", (req, res) => {
