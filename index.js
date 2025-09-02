@@ -884,8 +884,9 @@ app.post("/finalizeUpload1", async (req, res) => {
 });
 
 app.post("/uploadChunk2", async (req, res) => {
+  const { testLogID, index, sessionId } = req.body;
+
   try {
-    const { testLogID, index, sessionId } = req.body;
     logParameters({
       testLogID: testLogID,
       data: {
