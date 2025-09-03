@@ -11,6 +11,9 @@ const axios = require("axios");
 const { v4: uuidv4 } = require("uuid");
 const ffmpeg = require("fluent-ffmpeg");
 const { TranscoderServiceClient } = require("@google-cloud/video-transcoder");
+const { spawn } = require("child_process");
+const os = require("os");
+const fsp = fs.promises;
 
 const PORT = 3000;
 
@@ -209,6 +212,40 @@ async function getSessionInsights(
         insightsError: error,
       },
     });
+  }
+}
+
+async function fireInsights(
+  url,
+  email,
+  firstName,
+  lastName,
+  testName,
+  attemptNo,
+  token,
+  persona,
+  testLogID
+) {
+  try {
+    await axios.post("https://zimulate.me:99/submit-video-google", "", {
+      headers: { "Content-Type": "application/json" },
+      params: {
+        email,
+        firstName,
+        lastName,
+        testName,
+        attempt: attemptNo,
+        companyId: "LTI",
+        googleBucketPath: url,
+        token,
+        model: "gemini-2.5-pro",
+        location: "us-central1",
+        persona: persona,
+      },
+    });
+    console.log("✅ Insights API fired for", email);
+  } catch (err) {
+    console.error("❌ Insights API failed:", err.message);
   }
 }
 
@@ -919,247 +956,419 @@ app.post("/uploadChunk2", upload.single("chunk"), async (req, res) => {
   }
 });
 
-app.post("/finalizeUpload2", async (req, res) => {
+const tmpDir = (...p) => path.join(os.tmpdir(), ...p);
+
+const ensureDir = async (dir) => {
+  await fsp.mkdir(dir, { recursive: true });
+};
+
+const safeUnlink = async (p) => {
   try {
-    const {
+    await fsp.unlink(p);
+  } catch {}
+};
+
+const sanitizeEmail = (email) =>
+  String(email || "").replace(/[^a-zA-Z0-9._-]/g, "_");
+
+const dateStamp = () => {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(
+    d.getHours()
+  )}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
+};
+
+const runFFmpeg = (args, cwd) =>
+  new Promise((resolve, reject) => {
+    const p = spawn("ffmpeg", args, { cwd });
+    let stderr = "";
+    p.stderr.on("data", (d) => (stderr += d.toString()));
+    p.on("error", (err) => reject(err));
+    p.on("close", (code) => {
+      if (code === 0) return resolve();
+      const err = new Error(`ffmpeg exited with code ${code}`);
+      err.stderr = stderr;
+      reject(err);
+    });
+  });
+
+const cleanupElevenLabs = async ({ conversationId, agentId, testLogID }) => {
+  const headers = { "xi-api-key": ELEVEN_API_KEY };
+
+  if (conversationId) {
+    try {
+      await axios.delete(
+        `https://api.elevenlabs.io/v1/convai/conversations/${conversationId}`,
+        { headers }
+      );
+      logParameters({
+        testLogID,
+        data: { step: "Deleted conversation", side: "server", conversationId },
+      });
+    } catch (err) {
+      logParameters({
+        testLogID,
+        data: {
+          step: "Delete conversation failed",
+          side: "server",
+          error: err?.response?.data || err.message,
+        },
+      });
+    }
+  }
+
+  if (agentId) {
+    try {
+      await axios.delete(
+        `https://api.elevenlabs.io/v1/convai/agents/${agentId}`,
+        { headers }
+      );
+      logParameters({
+        testLogID,
+        data: { step: "Deleted agent", side: "server", agentId },
+      });
+    } catch (err) {
+      logParameters({
+        testLogID,
+        data: {
+          step: "Delete agent failed",
+          side: "server",
+          error: err?.response?.data || err.message,
+        },
+      });
+    }
+  }
+};
+
+// ---------- core steps ----------
+const downloadAllChunks = async (sessionId, testLogID) => {
+  const prefix = `${ROOT_FOLDER}/${sessionId}/chunks/`;
+  const [files] = await storage.bucket(SESSION_BUCKET).getFiles({ prefix });
+
+  const chunkFiles = files
+    .filter((f) => /\/chunk_\d+\.webm$/.test(f.name))
+    .sort((a, b) => {
+      const ai = parseInt(a.name.match(/chunk_(\d+)\.webm$/)[1], 10);
+      const bi = parseInt(b.name.match(/chunk_(\d+)\.webm$/)[1], 10);
+      return ai - bi;
+    });
+
+  if (chunkFiles.length === 0) {
+    throw new Error("No video chunks found in bucket.");
+  }
+
+  const localDir = tmpDir("merge", sessionId, "chunks");
+  await ensureDir(localDir);
+
+  const localPaths = [];
+  for (const f of chunkFiles) {
+    const filename = path.basename(f.name);
+    const dest = path.join(localDir, filename);
+    await f.download({ destination: dest });
+    localPaths.push(dest);
+  }
+
+  logParameters({
+    testLogID,
+    data: {
+      step: "Chunks downloaded",
+      side: "server",
+      localPathsCount: localPaths.length,
+    },
+  });
+
+  return { localDir, localPaths };
+};
+
+const mergeChunksWithFFmpeg = async ({ localDir, localPaths, testLogID }) => {
+  const listFile = path.join(localDir, "files.txt");
+  const listContent = localPaths
+    .map((p) => `file '${p.replace(/'/g, "'\\''")}'`)
+    .join("\n");
+  await fsp.writeFile(listFile, listContent);
+
+  const mergedPath = path.join(localDir, "merged.webm");
+  const args = [
+    "-f",
+    "concat",
+    "-safe",
+    "0",
+    "-i",
+    listFile,
+    "-c",
+    "copy",
+    "-y",
+    mergedPath,
+  ];
+
+  await runFFmpeg(args, localDir);
+
+  logParameters({
+    testLogID,
+    data: { step: "Chunks merged", side: "server", mergedPath },
+  });
+
+  return mergedPath;
+};
+
+const fetchAndStoreAudio = async ({ agentId, sessionId, testLogID }) => {
+  const headers = { "xi-api-key": ELEVEN_API_KEY };
+  const convoListRes = await axios.get(
+    "https://api.elevenlabs.io/v1/convai/conversations",
+    { headers, params: { agent_id: agentId } }
+  );
+
+  const conversationId = convoListRes.data?.conversations?.[0]?.conversation_id;
+  if (!conversationId) throw new Error("No conversation found for agent.");
+
+  const audioBuffer = await waitForAudio(
+    conversationId,
+    ELEVEN_API_KEY,
+    testLogID
+  );
+
+  const audioLocalDir = tmpDir("merge", sessionId, "audio");
+  await ensureDir(audioLocalDir);
+  const audioLocalPath = path.join(audioLocalDir, "audio.webm");
+  await fsp.writeFile(audioLocalPath, audioBuffer);
+
+  const audioGcsPath = `${ROOT_FOLDER}/${sessionId}/audio/audio.webm`;
+  await storage
+    .bucket(SESSION_BUCKET)
+    .file(audioGcsPath)
+    .save(audioBuffer, { contentType: "audio/webm" });
+
+  logParameters({
+    testLogID,
+    data: {
+      step: "Audio saved",
+      side: "server",
+      audioLocalPath,
+      audioGcsPath,
+      conversationId,
+    },
+  });
+
+  return { audioLocalPath, conversationId };
+};
+
+const muxVideoAndAudio = async ({
+  mergedVideoPath,
+  audioLocalPath,
+  sessionId,
+  testLogID,
+}) => {
+  const outDir = tmpDir("merge", sessionId, "out");
+  await ensureDir(outDir);
+  const finalLocalPath = path.join(outDir, "final.webm");
+
+  const args = [
+    "-i",
+    mergedVideoPath,
+    "-i",
+    audioLocalPath,
+    "-map",
+    "0:v:0",
+    "-map",
+    "1:a:0",
+    "-c:v",
+    "copy",
+    "-c:a",
+    "libopus",
+    "-shortest",
+    "-y",
+    finalLocalPath,
+  ];
+
+  await runFFmpeg(args, outDir);
+
+  logParameters({
+    testLogID,
+    data: { step: "Muxed final A/V", side: "server", finalLocalPath },
+  });
+
+  return finalLocalPath;
+};
+
+const uploadFinalVideo = async ({
+  localPath,
+  companyId,
+  testName,
+  email,
+  attemptNo,
+  testLogID,
+}) => {
+  const sanitized = sanitizeEmail(email);
+  const finalFileName = `FinalVideo_${sanitized}_${attemptNo}.webm`;
+
+  const uniqFolder = `${attemptNo}-${Date.now()}`;
+  const dated = dateStamp();
+  const gcsPath = `${companyId}/${testName}/${sanitized}/${uniqFolder}/${dated}/${finalFileName}`;
+
+  await storage.bucket(FINAL_BUCKET).upload(localPath, {
+    destination: gcsPath,
+    contentType: "video/webm",
+    resumable: false,
+  });
+
+  const publicUrl = `https://storage.googleapis.com/${FINAL_BUCKET}/${gcsPath}`;
+
+  logParameters({
+    testLogID,
+    data: { step: "Final video uploaded", side: "server", gcsPath, publicUrl },
+  });
+
+  return { gcsPath, publicUrl };
+};
+
+// ---------- The endpoint ----------
+app.post("/finalizeUpload2", async (req, res) => {
+  const {
+    companyId,
+    testName,
+    email,
+    attemptNo,
+    agentId,
+    sessionId,
+    testLogID,
+    firstName,
+    lastName,
+    token,
+    persona,
+  } = req.body || {};
+
+  const ctx = {
+    companyId,
+    testName,
+    email,
+    attemptNo,
+    agentId,
+    sessionId,
+    testLogID,
+  };
+
+  try {
+    if (
+      !sessionId ||
+      !agentId ||
+      !email ||
+      !companyId ||
+      !testName ||
+      !attemptNo
+    ) {
+      return res.status(400).json({ error: "Missing required fields." });
+    }
+
+    logParameters({
+      testLogID,
+      data: { step: "Finalize start", side: "server", ctx },
+    });
+
+    // 1) Download and merge chunks
+    const { localDir, localPaths } = await downloadAllChunks(
+      sessionId,
+      testLogID
+    );
+    const mergedVideoPath = await mergeChunksWithFFmpeg({
+      localDir,
+      localPaths,
+      testLogID,
+    });
+
+    // 2) Get ElevenLabs audio and stash to GCS (also keep local)
+    const { audioLocalPath, conversationId } = await fetchAndStoreAudio({
+      agentId,
+      sessionId,
+      testLogID,
+    });
+
+    // 3) Mux video + audio (video-only source is OK)
+    const finalLocalPath = await muxVideoAndAudio({
+      mergedVideoPath,
+      audioLocalPath,
+      sessionId,
+      testLogID,
+    });
+
+    // 4) Upload final WebM to bucket and create URL(s)
+    const { gcsPath, publicUrl, signedUrl } = await uploadFinalVideo({
+      localPath: finalLocalPath,
       companyId,
       testName,
       email,
       attemptNo,
-      agentId,
-      sessionId,
       testLogID,
-      firstName,
-      lastName,
-      token,
-      persona,
-    } = req.body;
-
-    if (!sessionId) throw new Error("Missing sessionId");
-
-    const bucket = storage.bucket(SESSION_BUCKET);
-
-    // ==============================
-    // 1. Save ElevenLabs audio
-    // ==============================
-    const convoListRes = await axios.get(
-      "https://api.elevenlabs.io/v1/convai/conversations",
-      {
-        headers: { "xi-api-key": ELEVEN_API_KEY },
-        params: { agent_id: agentId },
-      }
-    );
-    const conversationId =
-      convoListRes.data?.conversations?.[0]?.conversation_id;
-    if (!conversationId) throw new Error("No conversation found.");
-
-    const audioBuffer = await waitForAudio(
-      conversationId,
-      ELEVEN_API_KEY,
-      testLogID
-    );
-    const audioPath = `${ROOT_FOLDER}/${sessionId}/audio/audio.webm`;
-    await bucket.file(audioPath).save(audioBuffer, {
-      contentType: "audio/webm",
     });
-    console.log("🎤 ElevenLabs audio saved:", audioPath);
 
-    // ==============================
-    // 2. Merge chunks into one video
-    // ==============================
-    const [files] = await bucket.getFiles({
-      prefix: `${ROOT_FOLDER}/${sessionId}/chunks/`,
-    });
-    const chunkFiles = files
-      .filter((f) => f.name.endsWith(".webm"))
-      .sort((a, b) => {
-        const aIdx = parseInt(a.name.match(/chunk_(\d+)\.webm$/)?.[1] || 0);
-        const bIdx = parseInt(b.name.match(/chunk_(\d+)\.webm$/)?.[1] || 0);
-        return aIdx - bIdx;
-      });
-
-    if (chunkFiles.length === 0) {
-      throw new Error("No chunks found to merge.");
-    }
-    console.log(`📼 Found ${chunkFiles.length} chunks to merge.`);
-
-    const tmpDir = `/tmp/${sessionId}`;
-    fs.mkdirSync(tmpDir, { recursive: true });
-
-    const localChunkPaths = [];
-    for (let i = 0; i < chunkFiles.length; i++) {
-      const localPath = path.join(tmpDir, `chunk_${i}.webm`);
-      await bucket.file(chunkFiles[i].name).download({ destination: localPath });
-      localChunkPaths.push(localPath);
-    }
-
-    const listFile = path.join(tmpDir, "input.txt");
-    fs.writeFileSync(
-      listFile,
-      localChunkPaths.map((p) => `file '${p}'`).join("\n")
-    );
-
-    const mergedLocalPath = path.join(tmpDir, "merged.webm");
-    await new Promise((resolve, reject) => {
-      ffmpeg()
-        .input(listFile)
-        .inputOptions(["-f concat", "-safe 0"])
-        .outputOptions(["-c copy"])
-        .output(mergedLocalPath)
-        .on("end", resolve)
-        .on("error", reject)
-        .run();
-    });
-    console.log("🎉 Video chunks merged:", mergedLocalPath);
-
-    // ==============================
-    // 3. Upload merged video to bucket
-    // ==============================
-    const sanitizedEmail = sanitizeEmail(email);
-    const uniqID = crypto.randomUUID();
-    const finalFileName = `FinalVideo_${sanitizedEmail}_${attemptNo}.webm`;
-    const gcsPath = `${companyId}/${testName}/${email}/${attemptNo}-${uniqID}/${getCurrentDateFormatted(
-      testLogID
-    )}/${finalFileName}`;
-    const finalVideoUrl = `https://storage.googleapis.com/${SESSION_BUCKET}/${gcsPath}`;
-
-    await bucket.upload(mergedLocalPath, {
-      destination: gcsPath,
-      contentType: "video/webm",
-    });
-    console.log(`✅ Final merged video uploaded: ${finalVideoUrl}`);
-
-    // ==============================
-    // 4. Create Transcoder Job
-    // ==============================
-    const jobConfig = {
-      parent: `projects/${PROJECT_ID}/locations/${LOCATION}`,
-      job: {
-        inputAttachments: [
-          {
-            key: "video-input",
-            uri: `gs://${SESSION_BUCKET}/${gcsPath}`,
-          },
-          {
-            key: "audio-input",
-            uri: `gs://${SESSION_BUCKET}/${audioPath}`,
-          },
-        ],
-        elementaryStreams: [
-          { key: "video-stream", videoStream: { codec: "vp9" } },
-          { key: "audio-stream", audioStream: { codec: "opus" } },
-        ],
-        muxStreams: [
-          {
-            key: "final-stream",
-            container: "webm",
-            elementaryStreams: ["video-stream", "audio-stream"],
-            fileName: finalFileName,
-          },
-        ],
-        outputUri: `gs://${SESSION_BUCKET}/${companyId}/${testName}/${email}/${attemptNo}-${uniqID}/${getCurrentDateFormatted(
-          testLogID
-        )}/Video/`,
-      },
-    };
-
-    console.log("📦 Creating Transcoder job:", jobConfig);
-
-    let operation;
-    try {
-      [operation] = await transcoderServiceClient.createJob(jobConfig);
-      console.log("✅ Transcoder job created:", operation.name);
-    } catch (err) {
-      console.error("❌ Transcoder job creation failed:", err);
-      throw err;
-    }
-
-    // ==============================
-    // 5. Save metadata.json
-    // ==============================
-    const metaPath = `${companyId}/${testName}/${email}/${attemptNo}-${uniqID}/${getCurrentDateFormatted(
-      testLogID
-    )}/metadata.json`;
-
-    await bucket.file(metaPath).save(
-      JSON.stringify(
-        {
-          companyId,
-          testName,
+    // 5) Fire-and-forget insights with a URL that is definitely fetchable
+    const urlForInsights = signedUrl || publicUrl;
+    setImmediate(async () => {
+      try {
+        await getSessionInsights(
+          urlForInsights,
           email,
-          attemptNo,
-          agentId,
-          testLogID,
           firstName,
           lastName,
+          testName,
+          attemptNo,
           token,
           persona,
-          sessionId,
-          jobId: operation.name,
-          finalVideoUrl,
-          status: "processing",
-        },
-        null,
-        2
-      ),
-      { contentType: "application/json" }
-    );
-
-    console.log("📝 Metadata saved:", metaPath);
-
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-
-    res.json({ success: true, jobId: operation.name, finalVideoUrl });
-  } catch (err) {
-    console.error("❌ Finalize failed:", err);
-    res.status(500).json({ error: "Failed to finalize upload" });
-  }
-});
-
-app.post("/gcs-event", async (req, res) => {
-  const message = JSON.parse(
-    Buffer.from(req.body.message.data, "base64").toString()
-  );
-
-  const { bucket, name } = message;
-  if (!name.endsWith("Video/final.webm")) return res.status(200).send();
-
-  const sessionId = name.split("/")[1];
-  const metaPath = `${ROOT_FOLDER}/${sessionId}/metadata.json`;
-  const [contents] = await storage.bucket(bucket).file(metaPath).download();
-  const meta = JSON.parse(contents.toString());
-  const finalVideoUrl = `https://storage.googleapis.com/${bucket}/${name}`;
-
-  await getSessionInsights(
-    finalVideoUrl,
-    meta.email,
-    meta.firstName,
-    meta.lastName,
-    meta.testName,
-    meta.attemptNo,
-    meta.token,
-    meta.persona,
-    meta.testLogID
-  );
-  meta.status = "done";
-  meta.finalVideoUrl = `https://storage.googleapis.com/${bucket}/${name}`;
-  await storage
-    .bucket(bucket)
-    .file(metaPath)
-    .save(JSON.stringify(meta, null, 2), {
-      contentType: "application/json",
+          testLogID
+        );
+      } catch (e) {
+        logParameters({
+          testLogID,
+          data: {
+            step: "Insights failed",
+            side: "server",
+            error: e?.response?.data || e.message,
+          },
+        });
+      }
     });
 
-  logParameters({
-    testLogID: meta.testLogID,
-    data: {
-      step: "INsights called",
-      side: "server",
-      finalVideoUrl: meta.finalVideoUrl,
-    },
-  });
+    // 6) Fire-and-forget cleanup of ElevenLabs resources
+    setImmediate(() =>
+      cleanupElevenLabs({ conversationId, agentId, testLogID })
+    );
 
-  res.status(200).send();
+    // 7) Respond to client ASAP
+    res.json({
+      success: true,
+      finalVideoUrl: publicUrl,
+      signedUrl, // preferred for downstream fetch
+      gcsPath,
+    });
+
+    // 8) Best-effort temp cleanup (doesn’t block response)
+    setImmediate(async () => {
+      try {
+        await Promise.all(
+          [...localPaths, mergedVideoPath, audioLocalPath, finalLocalPath].map(
+            (p) => safeUnlink(p)
+          )
+        );
+      } catch {}
+      try {
+        await fsp.rm(path.dirname(path.dirname(localDir)), {
+          recursive: true,
+          force: true,
+        });
+      } catch {}
+    });
+  } catch (err) {
+    logParameters({
+      testLogID,
+      data: {
+        step: "Finalize failed",
+        side: "server",
+        error: err?.stderr || err?.response?.data || err.message,
+      },
+    });
+    console.error("❌ Finalize failed:", err?.stderr || err);
+    res.status(500).json({ error: "Failed to finalize upload" });
+  }
 });
 
 app.post("/log", (req, res) => {
