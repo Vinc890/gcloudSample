@@ -935,10 +935,12 @@ app.post("/finalizeUpload2", async (req, res) => {
       persona,
     } = req.body;
 
+    if (!sessionId) throw new Error("Missing sessionId");
+
     const bucket = storage.bucket(SESSION_BUCKET);
 
     // ==============================
-    // 1. Save ElevenLabs audio to bucket
+    // 1. Save ElevenLabs audio
     // ==============================
     const convoListRes = await axios.get(
       "https://api.elevenlabs.io/v1/convai/conversations",
@@ -947,7 +949,6 @@ app.post("/finalizeUpload2", async (req, res) => {
         params: { agent_id: agentId },
       }
     );
-
     const conversationId =
       convoListRes.data?.conversations?.[0]?.conversation_id;
     if (!conversationId) throw new Error("No conversation found.");
@@ -957,20 +958,18 @@ app.post("/finalizeUpload2", async (req, res) => {
       ELEVEN_API_KEY,
       testLogID
     );
-
     const audioPath = `${ROOT_FOLDER}/${sessionId}/audio/audio.webm`;
-    await bucket
-      .file(audioPath)
-      .save(audioBuffer, { contentType: "audio/webm" });
-
+    await bucket.file(audioPath).save(audioBuffer, {
+      contentType: "audio/webm",
+    });
     console.log("🎤 ElevenLabs audio saved:", audioPath);
 
     // ==============================
-    // 2. Merge video chunks into one file
+    // 2. Merge chunks into one video
     // ==============================
-    const chunksDir = `${ROOT_FOLDER}/${sessionId}/chunks/`;
-    const [files] = await bucket.getFiles({ prefix: chunksDir });
-
+    const [files] = await bucket.getFiles({
+      prefix: `${ROOT_FOLDER}/${sessionId}/chunks/`,
+    });
     const chunkFiles = files
       .filter((f) => f.name.endsWith(".webm"))
       .sort((a, b) => {
@@ -982,26 +981,56 @@ app.post("/finalizeUpload2", async (req, res) => {
     if (chunkFiles.length === 0) {
       throw new Error("No chunks found to merge.");
     }
+    console.log(`📼 Found ${chunkFiles.length} chunks to merge.`);
 
-    console.log(
-      "📼 Found chunk files:",
-      chunkFiles.map((f) => f.name)
-    );
+    const tmpDir = `/tmp/${sessionId}`;
+    fs.mkdirSync(tmpDir, { recursive: true });
 
-    // GCS compose API only allows up to 32 files
-    if (chunkFiles.length > 32) {
-      throw new Error(
-        `Too many chunks (${chunkFiles.length}). Use FFmpeg merge instead.`
-      );
+    const localChunkPaths = [];
+    for (let i = 0; i < chunkFiles.length; i++) {
+      const localPath = path.join(tmpDir, `chunk_${i}.webm`);
+      await bucket.file(chunkFiles[i].name).download({ destination: localPath });
+      localChunkPaths.push(localPath);
     }
 
-    const mergedVideoPath = `${ROOT_FOLDER}/${sessionId}/chunks/merged.webm`;
-    await bucket.file(mergedVideoPath).compose(chunkFiles);
+    const listFile = path.join(tmpDir, "input.txt");
+    fs.writeFileSync(
+      listFile,
+      localChunkPaths.map((p) => `file '${p}'`).join("\n")
+    );
 
-    console.log("✅ Merged video saved:", mergedVideoPath);
+    const mergedLocalPath = path.join(tmpDir, "merged.webm");
+    await new Promise((resolve, reject) => {
+      ffmpeg()
+        .input(listFile)
+        .inputOptions(["-f concat", "-safe 0"])
+        .outputOptions(["-c copy"])
+        .output(mergedLocalPath)
+        .on("end", resolve)
+        .on("error", reject)
+        .run();
+    });
+    console.log("🎉 Video chunks merged:", mergedLocalPath);
 
     // ==============================
-    // 3. Prepare Transcoder Job Config
+    // 3. Upload merged video to bucket
+    // ==============================
+    const sanitizedEmail = sanitizeEmail(email);
+    const uniqID = crypto.randomUUID();
+    const finalFileName = `FinalVideo_${sanitizedEmail}_${attemptNo}.webm`;
+    const gcsPath = `${companyId}/${testName}/${email}/${attemptNo}-${uniqID}/${getCurrentDateFormatted(
+      testLogID
+    )}/${finalFileName}`;
+    const finalVideoUrl = `https://storage.googleapis.com/${SESSION_BUCKET}/${gcsPath}`;
+
+    await bucket.upload(mergedLocalPath, {
+      destination: gcsPath,
+      contentType: "video/webm",
+    });
+    console.log(`✅ Final merged video uploaded: ${finalVideoUrl}`);
+
+    // ==============================
+    // 4. Create Transcoder Job
     // ==============================
     const jobConfig = {
       parent: `projects/${PROJECT_ID}/locations/${LOCATION}`,
@@ -1009,7 +1038,7 @@ app.post("/finalizeUpload2", async (req, res) => {
         inputAttachments: [
           {
             key: "video-input",
-            uri: `gs://${SESSION_BUCKET}/${mergedVideoPath}`,
+            uri: `gs://${SESSION_BUCKET}/${gcsPath}`,
           },
           {
             key: "audio-input",
@@ -1017,38 +1046,29 @@ app.post("/finalizeUpload2", async (req, res) => {
           },
         ],
         elementaryStreams: [
-          {
-            key: "video-stream",
-            videoStream: { codec: "vp9" },
-            inputKey: "video-input",
-          },
-          {
-            key: "audio-stream",
-            audioStream: { codec: "opus" },
-            inputKey: "audio-input",
-          },
+          { key: "video-stream", videoStream: { codec: "vp9" } },
+          { key: "audio-stream", audioStream: { codec: "opus" } },
         ],
         muxStreams: [
           {
             key: "final-stream",
             container: "webm",
             elementaryStreams: ["video-stream", "audio-stream"],
-            fileName: "final.webm",
+            fileName: finalFileName,
           },
         ],
-        outputUri: `gs://${SESSION_BUCKET}/${ROOT_FOLDER}/${sessionId}/Video/`,
+        outputUri: `gs://${SESSION_BUCKET}/${companyId}/${testName}/${email}/${attemptNo}-${uniqID}/${getCurrentDateFormatted(
+          testLogID
+        )}/Video/`,
       },
     };
 
-    console.log("📦 Creating Transcoder job with config:", jobConfig);
+    console.log("📦 Creating Transcoder job:", jobConfig);
 
-    // ==============================
-    // 4. Call Transcoder API
-    // ==============================
     let operation;
     try {
       [operation] = await transcoderServiceClient.createJob(jobConfig);
-      console.log("✅ Transcoder job created successfully:", operation.name);
+      console.log("✅ Transcoder job created:", operation.name);
     } catch (err) {
       console.error("❌ Transcoder job creation failed:", err);
       throw err;
@@ -1057,7 +1077,10 @@ app.post("/finalizeUpload2", async (req, res) => {
     // ==============================
     // 5. Save metadata.json
     // ==============================
-    const metaPath = `${ROOT_FOLDER}/${sessionId}/metadata.json`;
+    const metaPath = `${companyId}/${testName}/${email}/${attemptNo}-${uniqID}/${getCurrentDateFormatted(
+      testLogID
+    )}/metadata.json`;
+
     await bucket.file(metaPath).save(
       JSON.stringify(
         {
@@ -1073,6 +1096,7 @@ app.post("/finalizeUpload2", async (req, res) => {
           persona,
           sessionId,
           jobId: operation.name,
+          finalVideoUrl,
           status: "processing",
         },
         null,
@@ -1083,16 +1107,11 @@ app.post("/finalizeUpload2", async (req, res) => {
 
     console.log("📝 Metadata saved:", metaPath);
 
-    res.json({ success: true, jobId: operation.name });
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+
+    res.json({ success: true, jobId: operation.name, finalVideoUrl });
   } catch (err) {
-    logParameters({
-      data: {
-        step: "Finalize Fail",
-        side: "server",
-        err: err,
-      },
-    });
-    console.error("❌ Finalize failed with error:", err);
+    console.error("❌ Finalize failed:", err);
     res.status(500).json({ error: "Failed to finalize upload" });
   }
 });
