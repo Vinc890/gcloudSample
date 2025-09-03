@@ -1206,13 +1206,13 @@ const uploadFinalVideo = async ({
   const dated = dateStamp();
   const gcsPath = `${companyId}/${testName}/${sanitized}/${uniqFolder}/${dated}/${finalFileName}`;
 
-  await storage.bucket(FINAL_BUCKET).upload(localPath, {
+  await storage.bucket(SESSION_BUCKET).upload(localPath, {
     destination: gcsPath,
     contentType: "video/webm",
     resumable: false,
   });
 
-  const publicUrl = `https://storage.googleapis.com/${FINAL_BUCKET}/${gcsPath}`;
+  const publicUrl = `https://storage.googleapis.com/${SESSION_BUCKET}/${gcsPath}`;
 
   logParameters({
     testLogID,
