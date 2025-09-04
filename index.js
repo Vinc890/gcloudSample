@@ -1004,6 +1004,14 @@ const downloadAllChunks = async (sessionId, testLogID) => {
       const bi = parseInt(b.name.match(/chunk_(\d+)\.webm$/)[1], 10);
       return ai - bi;
     });
+  logParameters({
+    testLogID,
+    data: {
+      step: "downloadAllChunks",
+      side: "server",
+      chunkFiles: chunkFiles,
+    },
+  });
 
   if (chunkFiles.length === 0) {
     throw new Error("No video chunks found in bucket.");
@@ -1104,6 +1112,15 @@ const fetchAndStoreAudio = async ({ agentId, sessionId, testLogID }) => {
   const conversationId = convoListRes.data?.conversations?.[0]?.conversation_id;
   if (!conversationId) throw new Error("No conversation found for agent.");
 
+  logParameters({
+    testLogID,
+    data: {
+      step: "Convo List",
+      side: "server",
+      convoListRes: convoListRes,
+    },
+  });
+
   const audioBuffer = await waitForAudio(
     conversationId,
     ELEVEN_API_KEY,
@@ -1135,64 +1152,36 @@ const fetchAndStoreAudio = async ({ agentId, sessionId, testLogID }) => {
   return { audioLocalPath, conversationId };
 };
 
-// const muxVideoAndAudio = async ({
-//   mergedVideoPath,
-//   audioLocalPath,
-//   sessionId,
-//   testLogID,
-// }) => {
-//   const outDir = tmpDir("merge", sessionId, "out");
-//   await ensureDir(outDir);
-//   const finalLocalPath = path.join(outDir, "final.webm");
-
-//   const args = [
-//     "-i",
-//     mergedVideoPath,
-//     "-i",
-//     audioLocalPath,
-//     "-map",
-//     "0:v:0",
-//     "-map",
-//     "1:a:0",
-//     "-c:v",
-//     "copy",
-//     "-c:a",
-//     "libopus",
-//     "-shortest",
-//     "-y",
-//     finalLocalPath,
-//   ];
-
-//   await runFFmpeg(args, outDir);
-
-//   logParameters({
-//     testLogID,
-//     data: { step: "Muxed final A/V", side: "server", finalLocalPath },
-//   });
-
-//   return finalLocalPath;
-// };
-
-
 const muxVideoAndAudio = async ({
   mergedVideoPath,
   audioLocalPath,
   sessionId,
   testLogID,
 }) => {
+  logParameters({
+    testLogID,
+    data: { step: "muxVideoAndAudio", side: "server" },
+  });
   const outDir = tmpDir("merge", sessionId, "out");
   await ensureDir(outDir);
   const finalLocalPath = path.join(outDir, "final.webm");
 
   const args = [
-    "-i", mergedVideoPath,
-    "-i", audioLocalPath,
-    "-map", "0:v:0",
-    "-map", "1:a:0",
-    "-c:v", "libvpx",    
-    "-c:a", "libvorbis",  
-    "-shortest",          
-    "-y", finalLocalPath
+    "-i",
+    mergedVideoPath,
+    "-i",
+    audioLocalPath,
+    "-map",
+    "0:v:0",
+    "-map",
+    "1:a:0",
+    "-c:v",
+    "libvpx",
+    "-c:a",
+    "libvorbis",
+    "-shortest",
+    "-y",
+    finalLocalPath,
   ];
 
   await runFFmpeg(args, outDir);
@@ -1202,13 +1191,12 @@ const muxVideoAndAudio = async ({
     data: {
       step: "Muxed final A/V (re-encoded like fluent-ffmpeg)",
       side: "server",
-      finalLocalPath
+      finalLocalPath,
     },
   });
 
   return finalLocalPath;
 };
-
 
 const uploadFinalVideo = async ({
   localPath,
@@ -1218,6 +1206,11 @@ const uploadFinalVideo = async ({
   attemptNo,
   testLogID,
 }) => {
+  logParameters({
+    testLogID,
+    data: { step: "uploadFinalVideo", side: "server" },
+  });
+
   const sanitized = sanitizeEmail(email);
   const finalFileName = `FinalVideo_${sanitized}_${attemptNo}.webm`;
 
@@ -1283,7 +1276,6 @@ app.post("/finalizeUpload2", async (req, res) => {
       data: { step: "Finalize start", side: "server", ctx },
     });
 
-    // 1) Download and merge chunks
     const { localDir, localPaths } = await downloadAllChunks(
       sessionId,
       testLogID
@@ -1293,15 +1285,12 @@ app.post("/finalizeUpload2", async (req, res) => {
       localPaths,
       testLogID,
     });
-
-    // 2) Get ElevenLabs audio and stash to GCS (also keep local)
     const { audioLocalPath, conversationId } = await fetchAndStoreAudio({
       agentId,
       sessionId,
       testLogID,
     });
 
-    // 3) Mux video + audio (video-only source is OK)
     const finalLocalPath = await muxVideoAndAudio({
       mergedVideoPath,
       audioLocalPath,
@@ -1309,7 +1298,6 @@ app.post("/finalizeUpload2", async (req, res) => {
       testLogID,
     });
 
-    // 4) Upload final WebM to bucket and create URL(s)
     const { gcsPath, publicUrl, signedUrl } = await uploadFinalVideo({
       localPath: finalLocalPath,
       companyId,
@@ -1319,7 +1307,6 @@ app.post("/finalizeUpload2", async (req, res) => {
       testLogID,
     });
 
-    // 5) Fire-and-forget insights with a URL that is definitely fetchable
     const urlForInsights = signedUrl || publicUrl;
     setImmediate(async () => {
       try {
@@ -1346,20 +1333,17 @@ app.post("/finalizeUpload2", async (req, res) => {
       }
     });
 
-    // 6) Fire-and-forget cleanup of ElevenLabs resources
     setImmediate(() =>
       cleanupElevenLabs({ conversationId, agentId, testLogID })
     );
 
-    // 7) Respond to client ASAP
     res.json({
       success: true,
       finalVideoUrl: publicUrl,
-      signedUrl, // preferred for downstream fetch
+      signedUrl,
       gcsPath,
     });
 
-    // 8) Best-effort temp cleanup (doesn’t block response)
     setImmediate(async () => {
       try {
         await Promise.all(
