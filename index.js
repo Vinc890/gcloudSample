@@ -1135,6 +1135,45 @@ const fetchAndStoreAudio = async ({ agentId, sessionId, testLogID }) => {
   return { audioLocalPath, conversationId };
 };
 
+// const muxVideoAndAudio = async ({
+//   mergedVideoPath,
+//   audioLocalPath,
+//   sessionId,
+//   testLogID,
+// }) => {
+//   const outDir = tmpDir("merge", sessionId, "out");
+//   await ensureDir(outDir);
+//   const finalLocalPath = path.join(outDir, "final.webm");
+
+//   const args = [
+//     "-i",
+//     mergedVideoPath,
+//     "-i",
+//     audioLocalPath,
+//     "-map",
+//     "0:v:0",
+//     "-map",
+//     "1:a:0",
+//     "-c:v",
+//     "copy",
+//     "-c:a",
+//     "libopus",
+//     "-shortest",
+//     "-y",
+//     finalLocalPath,
+//   ];
+
+//   await runFFmpeg(args, outDir);
+
+//   logParameters({
+//     testLogID,
+//     data: { step: "Muxed final A/V", side: "server", finalLocalPath },
+//   });
+
+//   return finalLocalPath;
+// };
+
+
 const muxVideoAndAudio = async ({
   mergedVideoPath,
   audioLocalPath,
@@ -1146,32 +1185,30 @@ const muxVideoAndAudio = async ({
   const finalLocalPath = path.join(outDir, "final.webm");
 
   const args = [
-    "-i",
-    mergedVideoPath,
-    "-i",
-    audioLocalPath,
-    "-map",
-    "0:v:0",
-    "-map",
-    "1:a:0",
-    "-c:v",
-    "copy",
-    "-c:a",
-    "libopus",
-    "-shortest",
-    "-y",
-    finalLocalPath,
+    "-i", mergedVideoPath,
+    "-i", audioLocalPath,
+    "-map", "0:v:0",
+    "-map", "1:a:0",
+    "-c:v", "libvpx",    
+    "-c:a", "libvorbis",  
+    "-shortest",          
+    "-y", finalLocalPath
   ];
 
   await runFFmpeg(args, outDir);
 
   logParameters({
     testLogID,
-    data: { step: "Muxed final A/V", side: "server", finalLocalPath },
+    data: {
+      step: "Muxed final A/V (re-encoded like fluent-ffmpeg)",
+      side: "server",
+      finalLocalPath
+    },
   });
 
   return finalLocalPath;
 };
+
 
 const uploadFinalVideo = async ({
   localPath,
