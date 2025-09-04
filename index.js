@@ -1037,36 +1037,16 @@ const downloadAllChunks = async (sessionId, testLogID) => {
 };
 
 const mergeChunksWithFFmpeg = async ({ localDir, localPaths, testLogID }) => {
-  const listFile = path.join(localDir, "files.txt");
-  const listContent = localPaths
-    .map((p) => `file '${p.replace(/'/g, "'\\''")}'`)
-    .join("\n");
-  await fsp.writeFile(listFile, listContent);
-
-  logParameters({
-    testLogID,
-    data: {
-      step: "FFmpeg concat list created",
-      side: "server",
-      listFile,
-      listContent,
-    },
-  });
+  const concatStr = localPaths.join("|");
 
   const mergedPath = path.join(localDir, "merged.webm");
   const args = [
-    "-f",
-    "concat",
-    "-safe",
-    "0",
     "-i",
-    listFile,
+    `concat:${concatStr}`,
     "-c:v",
-    "libvpx",
-    "-b:v",
-    "1M", 
+    "libvpx-vp9",
     "-c:a",
-    "libopus", 
+    "libopus",
     "-y",
     mergedPath,
   ];
@@ -1074,18 +1054,14 @@ const mergeChunksWithFFmpeg = async ({ localDir, localPaths, testLogID }) => {
   logParameters({
     testLogID,
     data: {
-      step: "Running ffmpeg merge",
+      step: "Running ffmpeg merge (concat protocol)",
       side: "server",
       args,
+      concatStr,
     },
   });
 
   await runFFmpeg(args, localDir, testLogID);
-
-  logParameters({
-    testLogID,
-    data: { step: "Chunks merged", side: "server", mergedPath },
-  });
 
   return mergedPath;
 };
