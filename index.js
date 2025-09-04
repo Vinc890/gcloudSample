@@ -1079,10 +1079,10 @@ const runFFmpeg = (args, cwd, testLogID) => {
     const ffmpeg = spawn("ffmpeg", args, { cwd });
 
     ffmpeg.stdout.on("data", (data) => {
-      logParameters({
-        testLogID,
-        data: { step: "ffmpeg stdout", side: "server", log: data.toString() },
-      });
+      // logParameters({
+      //   testLogID,
+      //   data: { step: "ffmpeg stdout", side: "server", log: data.toString() },
+      // });
     });
 
     ffmpeg.stderr.on("data", (data) => {
