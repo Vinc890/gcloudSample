@@ -215,40 +215,6 @@ async function getSessionInsights(
   }
 }
 
-async function fireInsights(
-  url,
-  email,
-  firstName,
-  lastName,
-  testName,
-  attemptNo,
-  token,
-  persona,
-  testLogID
-) {
-  try {
-    await axios.post("https://zimulate.me:99/submit-video-google", "", {
-      headers: { "Content-Type": "application/json" },
-      params: {
-        email,
-        firstName,
-        lastName,
-        testName,
-        attempt: attemptNo,
-        companyId: "LTI",
-        googleBucketPath: url,
-        token,
-        model: "gemini-2.5-pro",
-        location: "us-central1",
-        persona: persona,
-      },
-    });
-    console.log("✅ Insights API fired for", email);
-  } catch (err) {
-    console.error("❌ Insights API failed:", err.message);
-  }
-}
-
 async function logParameters(params) {
   try {
     const response = await axios.post(
@@ -979,20 +945,6 @@ const dateStamp = () => {
   )}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
 };
 
-const runFFmpeg = (args, cwd) =>
-  new Promise((resolve, reject) => {
-    const p = spawn("ffmpeg", args, { cwd });
-    let stderr = "";
-    p.stderr.on("data", (d) => (stderr += d.toString()));
-    p.on("error", (err) => reject(err));
-    p.on("close", (code) => {
-      if (code === 0) return resolve();
-      const err = new Error(`ffmpeg exited with code ${code}`);
-      err.stderr = stderr;
-      reject(err);
-    });
-  });
-
 const cleanupElevenLabs = async ({ conversationId, agentId, testLogID }) => {
   const headers = { "xi-api-key": ELEVEN_API_KEY };
 
@@ -1041,7 +993,6 @@ const cleanupElevenLabs = async ({ conversationId, agentId, testLogID }) => {
   }
 };
 
-// ---------- core steps ----------
 const downloadAllChunks = async (sessionId, testLogID) => {
   const prefix = `${ROOT_FOLDER}/${sessionId}/chunks/`;
   const [files] = await storage.bucket(SESSION_BUCKET).getFiles({ prefix });
@@ -1062,11 +1013,13 @@ const downloadAllChunks = async (sessionId, testLogID) => {
   await ensureDir(localDir);
 
   const localPaths = [];
+  const cloudPaths = [];
   for (const f of chunkFiles) {
     const filename = path.basename(f.name);
     const dest = path.join(localDir, filename);
     await f.download({ destination: dest });
     localPaths.push(dest);
+    cloudPaths.push(f.name);
   }
 
   logParameters({
@@ -1074,7 +1027,9 @@ const downloadAllChunks = async (sessionId, testLogID) => {
     data: {
       step: "Chunks downloaded",
       side: "server",
-      localPathsCount: localPaths.length,
+      count: localPaths.length,
+      cloudPaths,
+      localPaths,
     },
   });
 
@@ -1088,6 +1043,16 @@ const mergeChunksWithFFmpeg = async ({ localDir, localPaths, testLogID }) => {
     .join("\n");
   await fsp.writeFile(listFile, listContent);
 
+  logParameters({
+    testLogID,
+    data: {
+      step: "FFmpeg concat list created",
+      side: "server",
+      listFile,
+      listContent,
+    },
+  });
+
   const mergedPath = path.join(localDir, "merged.webm");
   const args = [
     "-f",
@@ -1096,13 +1061,26 @@ const mergeChunksWithFFmpeg = async ({ localDir, localPaths, testLogID }) => {
     "0",
     "-i",
     listFile,
-    "-c",
-    "copy",
+    "-c:v",
+    "libvpx",
+    "-b:v",
+    "1M", 
+    "-c:a",
+    "libopus", 
     "-y",
     mergedPath,
   ];
 
-  await runFFmpeg(args, localDir);
+  logParameters({
+    testLogID,
+    data: {
+      step: "Running ffmpeg merge",
+      side: "server",
+      args,
+    },
+  });
+
+  await runFFmpeg(args, localDir, testLogID);
 
   logParameters({
     testLogID,
@@ -1110,6 +1088,34 @@ const mergeChunksWithFFmpeg = async ({ localDir, localPaths, testLogID }) => {
   });
 
   return mergedPath;
+};
+
+const runFFmpeg = (args, cwd, testLogID) => {
+  return new Promise((resolve, reject) => {
+    const ffmpeg = spawn("ffmpeg", args, { cwd });
+
+    ffmpeg.stdout.on("data", (data) => {
+      logParameters({
+        testLogID,
+        data: { step: "ffmpeg stdout", side: "server", log: data.toString() },
+      });
+    });
+
+    ffmpeg.stderr.on("data", (data) => {
+      logParameters({
+        testLogID,
+        data: { step: "ffmpeg stderr", side: "server", log: data.toString() },
+      });
+    });
+
+    ffmpeg.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`ffmpeg exited with code ${code}`));
+      }
+    });
+  });
 };
 
 const fetchAndStoreAudio = async ({ agentId, sessionId, testLogID }) => {
@@ -1222,7 +1228,6 @@ const uploadFinalVideo = async ({
   return { gcsPath, publicUrl };
 };
 
-// ---------- The endpoint ----------
 app.post("/finalizeUpload2", async (req, res) => {
   const {
     companyId,
