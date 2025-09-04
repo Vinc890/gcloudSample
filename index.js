@@ -1167,6 +1167,8 @@ const muxVideoAndAudio = async ({
   const finalLocalPath = path.join(outDir, "final.webm");
 
   const args = [
+    "-itsoffset",
+    "1.6",
     "-i",
     mergedVideoPath,
     "-i",
