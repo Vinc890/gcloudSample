@@ -1004,14 +1004,6 @@ const downloadAllChunks = async (sessionId, testLogID) => {
       const bi = parseInt(b.name.match(/chunk_(\d+)\.webm$/)[1], 10);
       return ai - bi;
     });
-  logParameters({
-    testLogID,
-    data: {
-      step: "downloadAllChunks",
-      side: "server",
-      chunkFiles: chunkFiles,
-    },
-  });
 
   if (chunkFiles.length === 0) {
     throw new Error("No video chunks found in bucket.");
@@ -1074,6 +1066,38 @@ const mergeChunksWithFFmpeg = async ({ localDir, localPaths, testLogID }) => {
   return mergedPath;
 };
 
+const mergeChunksByAppending = async ({ localDir, localPaths, testLogID }) => {
+  const mergedPath = path.join(localDir, "merged.webm");
+  const outStream = fs.createWriteStream(mergedPath);
+
+  for (const file of localPaths) {
+    logParameters({
+      testLogID,
+      data: {
+        step: "Appending chunk",
+        side: "server",
+        file,
+      },
+    });
+
+    const data = fs.readFileSync(file);
+    outStream.write(data);
+  }
+
+  outStream.end();
+
+  logParameters({
+    testLogID,
+    data: {
+      step: "All chunks appended",
+      side: "server",
+      mergedPath,
+    },
+  });
+
+  return mergedPath;
+};
+
 const runFFmpeg = (args, cwd, testLogID) => {
   return new Promise((resolve, reject) => {
     const ffmpeg = spawn("ffmpeg", args, { cwd });
@@ -1086,10 +1110,10 @@ const runFFmpeg = (args, cwd, testLogID) => {
     });
 
     ffmpeg.stderr.on("data", (data) => {
-      // logParameters({
-      //   testLogID,
-      //   data: { step: "ffmpeg stderr", side: "server", log: data.toString() },
-      // });
+      logParameters({
+        testLogID,
+        data: { step: "ffmpeg stderr", side: "server", log: data.toString() },
+      });
     });
 
     ffmpeg.on("close", (code) => {
@@ -1282,7 +1306,12 @@ app.post("/finalizeUpload2", async (req, res) => {
       sessionId,
       testLogID
     );
-    const mergedVideoPath = await mergeChunksWithFFmpeg({
+    // const mergedVideoPath = await mergeChunksWithFFmpeg({
+    //   localDir,
+    //   localPaths,
+    //   testLogID,
+    // });
+    const mergedVideoPath = await mergeChunksByAppending({
       localDir,
       localPaths,
       testLogID,
