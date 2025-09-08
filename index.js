@@ -892,7 +892,7 @@ app.post("/finalizeUpload1", async (req, res) => {
 
 app.post("/uploadChunk2", upload.single("chunk"), async (req, res) => {
   try {
-    const { sessionId, index } = req.body;
+    const { sessionId, index, testName, testLogID, email, attempt } = req.body;
     if (!req.file || !sessionId || !index) {
       return res
         .status(400)
@@ -900,17 +900,23 @@ app.post("/uploadChunk2", upload.single("chunk"), async (req, res) => {
     }
 
     const bucket = storage.bucket(SESSION_BUCKET);
-    const filePath = `${ROOT_FOLDER}/${sessionId}/chunks/chunk_${index}.webm`;
+    const filePath = `${ROOT_FOLDER}/${testName}/${email}/${attempt}-${sessionId}/chunks/chunk_${index}.webm`;
 
     await bucket.file(filePath).save(req.file.buffer, {
       contentType: "video/webm",
     });
 
-    console.log(`✅ Uploaded chunk ${index} for session ${sessionId}`);
-
+    logParameters({
+      testLogID: testLogID,
+      data: {
+        step: `✅ Uploaded chunk ${index} for session ${sessionId} at ${filePath}`,
+        side: "server",
+      },
+    });
     res.json({ success: true, path: filePath });
   } catch (err) {
     logParameters({
+      testLogID: testLogID,
       data: {
         step: "Chunks Fail",
         side: "server",
@@ -993,8 +999,14 @@ const cleanupElevenLabs = async ({ conversationId, agentId, testLogID }) => {
   }
 };
 
-const downloadAllChunks = async (sessionId, testLogID) => {
-  const prefix = `${ROOT_FOLDER}/${sessionId}/chunks/`;
+const downloadAllChunks = async (
+  sessionId,
+  testLogID,
+  testName,
+  email,
+  attemptNo
+) => {
+  const prefix = `${ROOT_FOLDER}/${testName}/${email}/${attemptNo}-${sessionId}/chunks/`;
   const [files] = await storage.bucket(SESSION_BUCKET).getFiles({ prefix });
 
   const chunkFiles = files
@@ -1126,7 +1138,14 @@ const runFFmpeg = (args, cwd, testLogID) => {
   });
 };
 
-const fetchAndStoreAudio = async ({ agentId, sessionId, testLogID }) => {
+const fetchAndStoreAudio = async ({
+  agentId,
+  sessionId,
+  testLogID,
+  testName,
+  email,
+  attemptNo,
+}) => {
   const headers = { "xi-api-key": ELEVEN_API_KEY };
   const convoListRes = await axios.get(
     "https://api.elevenlabs.io/v1/convai/conversations",
@@ -1156,7 +1175,7 @@ const fetchAndStoreAudio = async ({ agentId, sessionId, testLogID }) => {
   const audioLocalPath = path.join(audioLocalDir, "audio.webm");
   await fsp.writeFile(audioLocalPath, audioBuffer);
 
-  const audioGcsPath = `${ROOT_FOLDER}/${sessionId}/audio/audio.webm`;
+  const audioGcsPath = `${ROOT_FOLDER}/${testName}/${email}/${attemptNo}-${sessionId}/audio/audio.webm`;
   await storage
     .bucket(SESSION_BUCKET)
     .file(audioGcsPath)
@@ -1304,14 +1323,17 @@ app.post("/finalizeUpload2", async (req, res) => {
 
     const { localDir, localPaths } = await downloadAllChunks(
       sessionId,
-      testLogID
+      testLogID,
+      testName,
+      email,
+      attemptNo
     );
     // const mergedVideoPath = await mergeChunksWithFFmpeg({
     //   localDir,
     //   localPaths,
     //   testLogID,
     // });
-    const mergedVideoPath = await mergeChunksByAppending({
+    const mergedVideoPath = await mergeChunksWithFFmpeg({
       localDir,
       localPaths,
       testLogID,
@@ -1320,6 +1342,9 @@ app.post("/finalizeUpload2", async (req, res) => {
       agentId,
       sessionId,
       testLogID,
+      testName,
+      email,
+      attemptNo,
     });
 
     const finalLocalPath = await muxVideoAndAudio({
