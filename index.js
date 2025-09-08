@@ -1080,7 +1080,7 @@ const mergeChunksWithFFmpeg = async ({ localDir, localPaths, testLogID }) => {
 
 const mergeChunksByAppending = async ({ localDir, localPaths, testLogID }) => {
   const mergedPath = path.join(localDir, "merged.webm");
-  const outStream = fs.createWriteStream(mergedPath);
+  // const outStream = fs.createWriteStream(mergedPath);
 
   for (const file of localPaths) {
     logParameters({
@@ -1093,10 +1093,11 @@ const mergeChunksByAppending = async ({ localDir, localPaths, testLogID }) => {
     });
 
     const data = fs.readFileSync(file);
-    outStream.write(data);
+    fs.appendFileSync(mergedPath, data);
+    // outStream.write(data);
   }
 
-  outStream.end();
+  // outStream.end();
 
   logParameters({
     testLogID,
@@ -1201,46 +1202,65 @@ const muxVideoAndAudio = async ({
   sessionId,
   testLogID,
 }) => {
-  logParameters({
-    testLogID,
-    data: { step: "muxVideoAndAudio", side: "server" },
-  });
-  const outDir = tmpDir("merge", sessionId, "out");
-  await ensureDir(outDir);
-  const finalLocalPath = path.join(outDir, "final.webm");
+  return new Promise(async (resolve, reject) => {
+    logParameters({
+      testLogID,
+      data: { step: "muxVideoAndAudio", side: "server" },
+    });
+    const outDir = tmpDir("merge", sessionId, "out");
+    await ensureDir(outDir);
+    const finalLocalPath = path.join(outDir, "final.webm");
 
-  const args = [
-    "-itsoffset",
-    "1.6",
-    "-i",
-    mergedVideoPath,
-    "-i",
-    audioLocalPath,
-    "-map",
-    "0:v:0",
-    "-map",
-    "1:a:0",
-    "-c:v",
-    "libvpx",
-    "-c:a",
-    "libvorbis",
-    "-shortest",
-    "-y",
-    finalLocalPath,
-  ];
-
-  await runFFmpeg(args, outDir);
-
-  logParameters({
-    testLogID,
-    data: {
-      step: "Muxed final A/V (re-encoded like fluent-ffmpeg)",
-      side: "server",
+    const args = [
+      "-itsoffset",
+      "1.6",
+      "-i",
+      mergedVideoPath,
+      "-i",
+      audioLocalPath,
+      "-map",
+      "0:v:0",
+      "-map",
+      "1:a:0",
+      "-c:v",
+      "libvpx",
+      "-c:a",
+      "libvorbis",
+      "-shortest",
+      "-y",
       finalLocalPath,
-    },
-  });
+    ];
 
-  return finalLocalPath;
+    await runFFmpeg(args, outDir);
+
+    const watcher = fs.watch(outDir, (eventType, filename) => {
+      if (filename === "final.webm" && fs.existsSync(finalLocalPath)) {
+        watcher.close();
+        logParameters({
+          testLogID,
+          data: {
+            step: "Muxed final A/V (re-encoded like fluent-ffmpeg) File Found",
+            side: "server",
+            finalLocalPath,
+          },
+        });
+        resolve(finalLocalPath);
+      }
+    });
+
+    setTimeout(() => {
+      watcher.close();
+      logParameters({
+        testLogID,
+        data: {
+          step: "Muxed final A/V (re-encoded like fluent-ffmpeg) Failed Path Not found",
+          side: "server",
+          finalLocalPath,
+        },
+      });
+      reject(new Error("Timeout waiting for final video file"));
+    }, 30000);
+  });
 };
 
 const uploadFinalVideo = async ({
