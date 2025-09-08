@@ -1333,7 +1333,7 @@ app.post("/finalizeUpload2", async (req, res) => {
     //   localPaths,
     //   testLogID,
     // });
-    const mergedVideoPath = await mergeChunksWithFFmpeg({
+    const mergedVideoPath = await mergeChunksByAppending({
       localDir,
       localPaths,
       testLogID,
