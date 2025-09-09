@@ -1270,7 +1270,7 @@ const muxVideoAndAudio = async ({
         },
       });
       reject(new Error("Timeout waiting for final video file"));
-    }, 30000);
+    }, 6000000);
   });
 };
 
