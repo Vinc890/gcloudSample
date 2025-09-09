@@ -1134,10 +1134,10 @@ const runFFmpeg = (args, cwd, testLogID) => {
     });
 
     ffmpeg.stderr.on("data", (data) => {
-      logParameters({
-        testLogID,
-        data: { step: "ffmpeg stderr", side: "server", log: data.toString() },
-      });
+      // logParameters({
+      //   testLogID,
+      //   data: { step: "ffmpeg stderr", side: "server", log: data.toString() },
+      // });
     });
 
     ffmpeg.on("close", (code) => {
