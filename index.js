@@ -1096,6 +1096,17 @@ const mergeChunksByAppending = async ({ localDir, localPaths, testLogID }) => {
     fs.appendFileSync(mergedPath, data);
     // outStream.write(data);
   }
+  if (fs.existsSync(mergedPath)) {
+    logParameters({
+      testLogID,
+      data: {
+        step: "Merged file exists",
+        side: "server",
+        mergedPath,
+        date: new Date(),
+      },
+    });
+  }
 
   // outStream.end();
 
@@ -1231,7 +1242,7 @@ const muxVideoAndAudio = async ({
       finalLocalPath,
     ];
 
-    await runFFmpeg(args, outDir);
+    await runFFmpeg(args, outDir, testLogID);
 
     const watcher = fs.watch(outDir, (eventType, filename) => {
       if (filename === "final.webm" && fs.existsSync(finalLocalPath)) {
