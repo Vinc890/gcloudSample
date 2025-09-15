@@ -714,6 +714,7 @@ app.post("/finalizeUpload2", async (req, res) => {
     lastName,
     token,
     persona,
+    requestID,
   } = req.body || {};
 
   const ctx = {
@@ -724,6 +725,7 @@ app.post("/finalizeUpload2", async (req, res) => {
     agentId,
     sessionId,
     testLogID,
+    requestID,
   };
 
   try {
