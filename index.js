@@ -527,8 +527,24 @@ const runFFmpeg = (args, cwd, testLogID) => {
 
     ffmpeg.on("close", (code) => {
       if (code === 0) {
+        logParameters({
+          testLogID,
+          data: {
+            step: "ffmpeg resolved",
+            side: "server",
+            code: code,
+          },
+        });
         resolve();
       } else {
+        logParameters({
+          testLogID,
+          data: {
+            step: "ffmpeg rejected",
+            side: "server",
+            code: code,
+          },
+        });
         reject(new Error(`ffmpeg exited with code ${code}`));
       }
     });
@@ -627,6 +643,7 @@ const muxVideoAndAudio = async ({
   const outDir = tmpDir("merge", sessionId, "out");
   await ensureDir(outDir);
   const finalLocalPath = path.join(outDir, "final.webm");
+  let counter = 0;
 
   const args = [
     "-hide_banner",
@@ -656,13 +673,42 @@ const muxVideoAndAudio = async ({
   logParameters({
     testLogID,
     data: {
-      step: "Muxed final A/V (re-encoded like fluent-ffmpeg)",
+      step: "Muxed final A/V file",
       side: "server",
       finalLocalPath,
     },
   });
 
-  return finalLocalPath;
+  let fileExists = false;
+
+  const fileCheckInterval = setInterval(() => {
+    if (counter >= 12) {
+      if (fs.existsSync(finalLocalPath)) {
+        logParameters({
+          testLogID,
+          data: {
+            step: "Final file exists",
+            side: "server",
+            mergedPath,
+            date: new Date(),
+          },
+        });
+        fileExists = true;
+        clearInterval(fileCheckInterval);
+      }
+      counter++;
+    } else {
+      clearInterval(fileCheckInterval);
+    }
+  }, 5000);
+
+  if (fileExists) {
+    return finalLocalPath;
+  } else {
+    throw new Error(
+      `Final muxed file not found after ffmpeg. ${finalLocalPath}`
+    );
+  }
 };
 
 const uploadFinalVideo = async ({
@@ -752,11 +798,6 @@ app.post("/finalizeUpload2", async (req, res) => {
       email,
       attemptNo
     );
-    // const mergedVideoPath = await mergeChunksWithFFmpeg({
-    //   localDir,
-    //   localPaths,
-    //   testLogID,
-    // });
     const mergedVideoPath = await mergeChunksByAppending({
       localDir,
       localPaths,
