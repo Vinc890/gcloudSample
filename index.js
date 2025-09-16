@@ -630,6 +630,79 @@ const fetchAndStoreAudio = async ({
   return { audioLocalPath, conversationId };
 };
 
+function waitForFile({
+  checkDir,
+  outDir,
+  finalLocalPath,
+  testLogID,
+  interval = 5000,
+  maxChecks = 12,
+}) {
+  return new Promise((resolve, reject) => {
+    let counter = 0;
+
+    const fileCheckInterval = setInterval(() => {
+      counter++;
+
+      if (counter >= maxChecks) {
+        clearInterval(fileCheckInterval);
+        reject(new Error("File not found within max checks" + finalLocalPath));
+      } else {
+        // --- Check checkDir ---
+        try {
+          const files = fs.readdirSync(checkDir);
+          files.forEach((file) => {
+            console.log(file);
+            logParameters({
+              testLogID,
+              data: { step: "Check checkDir", side: "server", file },
+            });
+          });
+        } catch (err) {
+          logParameters({
+            testLogID,
+            data: { step: "Check checkDir Fail", side: "server", err },
+          });
+          console.error("Error reading directory checkDir:", err);
+        }
+
+        // --- Check outDir ---
+        try {
+          const files = fs.readdirSync(outDir);
+          files.forEach((file) => {
+            console.log(file);
+            logParameters({
+              testLogID,
+              data: { step: "Check outDir", side: "server", file },
+            });
+          });
+        } catch (err) {
+          logParameters({
+            testLogID,
+            data: { step: "Check outDir Fail", side: "server", err },
+          });
+          console.error("Error reading directory outDir:", err);
+        }
+
+        // --- Final File Check ---
+        if (fs.existsSync(finalLocalPath)) {
+          logParameters({
+            testLogID,
+            data: {
+              step: "Final file exists" + finalLocalPath,
+              side: "server",
+              finalLocalPath,
+              date: new Date(),
+            },
+          });
+          clearInterval(fileCheckInterval);
+          resolve(true); // resolve with file path
+        }
+      }
+    }, interval);
+  });
+}
+
 const muxVideoAndAudio = async ({
   mergedVideoPath,
   audioLocalPath,
@@ -645,7 +718,6 @@ const muxVideoAndAudio = async ({
 
   await ensureDir(outDir);
   const finalLocalPath = path.join(outDir, "final.webm");
-  let counter = 0;
 
   const args = [
     "-hide_banner",
@@ -681,83 +753,15 @@ const muxVideoAndAudio = async ({
     },
   });
 
-  let fileExists = false;
+  const filesDoesExist = await waitForFile({
+    checkDir,
+    outDir,
+    finalLocalPath,
+    testLogID,
+  });
 
-  const fileCheckInterval = setInterval(() => {
-    if (counter >= 12) {
-      try {
-        const files = fs.readdirSync(checkDir);
-        files.forEach((file) => {
-          console.log(file);
-          logParameters({
-            testLogID,
-            data: {
-              step: "Check checkDir",
-              side: "server",
-              file: file,
-            },
-          });
-        });
-      } catch (err) {
-        logParameters({
-          testLogID,
-          data: {
-            step: "Check checkDir Fail",
-            side: "server",
-            err: err,
-          },
-        });
-        console.error("Error reading directory checkDir:", err);
-      }
-      try {
-        const files = fs.readdirSync(outDir);
-        files.forEach((file) => {
-          console.log(file);
-          logParameters({
-            testLogID,
-            data: {
-              step: "Check outDir",
-              side: "server",
-              file: file,
-            },
-          });
-        });
-      } catch (err) {
-        logParameters({
-          testLogID,
-          data: {
-            step: "Check outDir Fail",
-            side: "server",
-            err: err,
-          },
-        });
-        console.error("Error reading directory outDir:", err);
-      }
-      if (fs.existsSync(finalLocalPath)) {
-        logParameters({
-          testLogID,
-          data: {
-            step: "Final file exists",
-            side: "server",
-            mergedPath,
-            date: new Date(),
-          },
-        });
-        fileExists = true;
-        clearInterval(fileCheckInterval);
-      }
-      counter++;
-    } else {
-      clearInterval(fileCheckInterval);
-    }
-  }, 5000);
-
-  if (fileExists) {
+  if (filesDoesExist) {
     return finalLocalPath;
-  } else {
-    throw new Error(
-      `Final muxed file not found after ffmpeg. ${finalLocalPath}`
-    );
   }
 };
 
