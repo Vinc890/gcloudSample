@@ -854,9 +854,9 @@ app.post("/finalizeUpload2", async (req, res) => {
       }
     });
 
-    setImmediate(() =>
-      cleanupElevenLabs({ conversationId, agentId, testLogID })
-    );
+    // setImmediate(() =>
+    //   cleanupElevenLabs({ conversationId, agentId, testLogID })
+    // );
 
     res.json({
       success: true,
