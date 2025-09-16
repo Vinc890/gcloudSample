@@ -641,6 +641,8 @@ const muxVideoAndAudio = async ({
     data: { step: "muxVideoAndAudio", side: "server" },
   });
   const outDir = tmpDir("merge", sessionId, "out");
+  const checkDir = tmpDir("merge", sessionId);
+
   await ensureDir(outDir);
   const finalLocalPath = path.join(outDir, "final.webm");
   let counter = 0;
@@ -683,6 +685,54 @@ const muxVideoAndAudio = async ({
 
   const fileCheckInterval = setInterval(() => {
     if (counter >= 12) {
+      try {
+        const files = fs.readdirSync(checkDir);
+        files.forEach((file) => {
+          console.log(file);
+          logParameters({
+            testLogID,
+            data: {
+              step: "Check checkDir",
+              side: "server",
+              file: file,
+            },
+          });
+        });
+      } catch (err) {
+        logParameters({
+          testLogID,
+          data: {
+            step: "Check checkDir Fail",
+            side: "server",
+            err: err,
+          },
+        });
+        console.error("Error reading directory checkDir:", err);
+      }
+      try {
+        const files = fs.readdirSync(outDir);
+        files.forEach((file) => {
+          console.log(file);
+          logParameters({
+            testLogID,
+            data: {
+              step: "Check outDir",
+              side: "server",
+              file: file,
+            },
+          });
+        });
+      } catch (err) {
+        logParameters({
+          testLogID,
+          data: {
+            step: "Check outDir Fail",
+            side: "server",
+            err: err,
+          },
+        });
+        console.error("Error reading directory outDir:", err);
+      }
       if (fs.existsSync(finalLocalPath)) {
         logParameters({
           testLogID,
