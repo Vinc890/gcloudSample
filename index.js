@@ -1,15 +1,10 @@
 require("dotenv").config();
 const express = require("express");
 const multer = require("multer");
-const fs = require("fs");
-const path = require("path");
 const { Storage } = require("@google-cloud/storage");
 const cors = require("cors");
 const { google } = require("googleapis");
 const axios = require("axios");
-const { spawn } = require("child_process");
-const os = require("os");
-const fsp = fs.promises;
 
 const PORT = 3000;
 
@@ -23,170 +18,9 @@ const upload = multer();
 const SESSION_BUCKET = "zimulate";
 const ROOT_FOLDER = "sessions";
 const ELEVEN_API_KEY = "sk_c7b1c1925e918c3c7ae8a3007acf57f489fb4e099b151b8b";
+const ELEVEN_LABS_BASE_URL = "https://api.elevenlabs.io/v1/convai";
+
 const storage = new Storage();
-
-async function waitForAudio(conversationId, apiKey, testLogID) {
-  logParameters({
-    testLogID: testLogID,
-    data: {
-      step: "Waiting for audio for conversation ID",
-      side: "server",
-      " Waiting for audio for conversation ID": conversationId,
-    },
-  });
-  let convoRes;
-  for (let attempt = 1; attempt <= 10; attempt++) {
-    try {
-      convoRes = await axios.get(
-        `https://api.elevenlabs.io/v1/convai/conversations/${conversationId}`,
-        { headers: { "xi-api-key": apiKey } }
-      );
-      const { message_count, status } = convoRes.data;
-
-      logParameters({
-        testLogID: testLogID,
-        data: {
-          step: "Fetching details for audio",
-          side: "server",
-          Attempt: attempt,
-          status: status,
-          message_count: message_count,
-          maxRetries: maxRetries,
-          condition: attempt <= maxRetries,
-        },
-      });
-
-      if (status == "done") {
-        break;
-      }
-    } catch (err) {
-      logParameters({
-        testLogID: testLogID,
-        data: {
-          step: "Error checking conversation status",
-          side: "server",
-          "Error checking conversation status:": err,
-        },
-      });
-    }
-    await new Promise((res) => setTimeout(res, 5000));
-  }
-
-  if (convoRes.data.status === "done") {
-    try {
-      logParameters({
-        testLogID: testLogID,
-        data: {
-          step: "Fetching audio",
-          side: "server",
-          conversationId: conversationId,
-        },
-      });
-      const audioRes = await axios.get(
-        `https://api.elevenlabs.io/v1/convai/conversations/${conversationId}/audio`,
-        {
-          headers: { "xi-api-key": apiKey },
-          responseType: "arraybuffer",
-        }
-      );
-      const tranScriptRes = await axios.get(
-        `https://api.elevenlabs.io/v1/convai/conversations/${conversationId}`,
-        {
-          headers: { "xi-api-key": apiKey },
-        }
-      );
-      logParameters({
-        testLogID: testLogID,
-        data: {
-          step: "Fetched audio",
-          side: "server",
-          "Audio fetched successfully.": true,
-        },
-      });
-      logParameters({
-        testLogID: testLogID,
-        data: {
-          step: `Transcript for convoID ${conversationId}`,
-          side: "server",
-          transcript: tranScriptRes.data.transcript.map((el) => el.message),
-        },
-      });
-      return audioRes.data;
-    } catch (err) {
-      if (err.response?.status !== 404) throw err;
-      logParameters({
-        testLogID: testLogID,
-        data: {
-          step: "Audio not ready yet (404). Will retry",
-          side: "server",
-        },
-      });
-    }
-  } else throw new Error("⏰ Timed out waiting for conversation audio.");
-}
-
-async function getSessionInsights(
-  url,
-  email,
-  firstName,
-  lastName,
-  testName,
-  attemptNo,
-  token,
-  persona,
-  testLogID
-) {
-  try {
-    logParameters({
-      testLogID: testLogID,
-      data: {
-        step: "Inside Result API",
-        side: "Client",
-      },
-    });
-    const response = await axios.post(
-      "https://zimulate.me:99/submit-video-google",
-      "",
-      {
-        headers: { "Content-Type": "application/json" },
-        params: {
-          email,
-          firstName,
-          lastName,
-          testName,
-          attempt: attemptNo,
-          companyId: "LTI",
-          googleBucketPath: url,
-          token,
-          model: "gemini-2.5-pro",
-          location: "us-central1",
-          persona: persona,
-        },
-      }
-    );
-
-    if (response.status == 200) {
-      logParameters({
-        testLogID: testLogID,
-        data: {
-          step: "Results API called successfully",
-          side: "Client",
-          insights: response.data,
-        },
-      });
-    }
-  } catch (error) {
-    console.error(error);
-    logParameters({
-      testLogID: testLogID,
-      data: {
-        step: "Result API call failed",
-        side: "Client",
-        insightsError: error,
-      },
-    });
-  }
-}
 
 async function logParameters(params) {
   try {
@@ -317,649 +151,121 @@ app.post("/uploadChunk2", upload.single("chunk"), async (req, res) => {
   }
 });
 
-const tmpDir = (...p) => path.join(os.tmpdir(), ...p);
-
-const ensureDir = async (dir) => {
-  await fsp.mkdir(dir, { recursive: true });
-};
-
-const safeUnlink = async (p) => {
-  try {
-    await fsp.unlink(p);
-  } catch {}
-};
-
-const sanitizeEmail = (email) =>
-  String(email || "").replace(/[^a-zA-Z0-9._-]/g, "_");
-
-const dateStamp = () => {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(
-    d.getHours()
-  )}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
-};
-
-const cleanupElevenLabs = async ({ conversationId, agentId, testLogID }) => {
-  const headers = { "xi-api-key": ELEVEN_API_KEY };
-
-  if (conversationId) {
-    try {
-      await axios.delete(
-        `https://api.elevenlabs.io/v1/convai/conversations/${conversationId}`,
-        { headers }
-      );
-      logParameters({
-        testLogID,
-        data: { step: "Deleted conversation", side: "server", conversationId },
-      });
-    } catch (err) {
-      logParameters({
-        testLogID,
-        data: {
-          step: "Delete conversation failed",
-          side: "server",
-          error: err?.response?.data || err.message,
-        },
-      });
-    }
-  }
-
-  if (agentId) {
-    try {
-      await axios.delete(
-        `https://api.elevenlabs.io/v1/convai/agents/${agentId}`,
-        { headers }
-      );
-      logParameters({
-        testLogID,
-        data: { step: "Deleted agent", side: "server", agentId },
-      });
-    } catch (err) {
-      logParameters({
-        testLogID,
-        data: {
-          step: "Delete agent failed",
-          side: "server",
-          error: err?.response?.data || err.message,
-        },
-      });
-    }
-  }
-};
-
-const downloadAllChunks = async (
-  sessionId,
-  testLogID,
-  testName,
-  email,
-  attemptNo
-) => {
-  const prefix = `${ROOT_FOLDER}/${testName}/${email}/${attemptNo}-${sessionId}/chunks/`;
-  const [files] = await storage.bucket(SESSION_BUCKET).getFiles({ prefix });
-
-  const chunkFiles = files
-    .filter((f) => /\/chunk_\d+\.webm$/.test(f.name))
-    .sort((a, b) => {
-      const ai = parseInt(a.name.match(/chunk_(\d+)\.webm$/)[1], 10);
-      const bi = parseInt(b.name.match(/chunk_(\d+)\.webm$/)[1], 10);
-      return ai - bi;
-    });
-
-  if (chunkFiles.length === 0) {
-    throw new Error("No video chunks found in bucket.");
-  }
-
-  const localDir = tmpDir("merge", sessionId, "chunks");
-  await ensureDir(localDir);
-
-  const localPaths = [];
-  const cloudPaths = [];
-  for (const f of chunkFiles) {
-    const filename = path.basename(f.name);
-    const dest = path.join(localDir, filename);
-    await f.download({ destination: dest });
-    localPaths.push(dest);
-    cloudPaths.push(f.name);
-  }
-
-  logParameters({
-    testLogID,
-    data: {
-      step: "Chunks downloaded",
-      side: "server",
-      count: localPaths.length,
-      cloudPaths,
-      localPaths,
-    },
-  });
-
-  return { localDir, localPaths };
-};
-
-const mergeChunksWithFFmpeg = async ({ localDir, localPaths, testLogID }) => {
-  const concatStr = localPaths.join("|");
-
-  const mergedPath = path.join(localDir, "merged.webm");
-  const args = [
-    "-i",
-    `concat:${concatStr}`,
-    "-c:v",
-    "libvpx-vp9",
-    "-c:a",
-    "libopus",
-    "-y",
-    mergedPath,
-  ];
-
-  logParameters({
-    testLogID,
-    data: {
-      step: "Running ffmpeg merge (concat protocol)",
-      side: "server",
-      args,
-      concatStr,
-    },
-  });
-
-  await runFFmpeg(args, localDir, testLogID);
-
-  return mergedPath;
-};
-
-const mergeChunksByAppending = async ({ localDir, localPaths, testLogID }) => {
-  const mergedPath = path.join(localDir, "merged.webm");
-
-  for (const file of localPaths) {
-    logParameters({
-      testLogID,
-      data: {
-        step: "Appending chunk",
-        side: "server",
-        file,
-      },
-    });
-
-    const data = fs.readFileSync(file);
-    fs.appendFileSync(mergedPath, data);
-  }
-  if (fs.existsSync(mergedPath)) {
-    logParameters({
-      testLogID,
-      data: {
-        step: "Merged file exists",
-        side: "server",
-        mergedPath,
-        date: new Date(),
-      },
-    });
-  }
-
-  logParameters({
-    testLogID,
-    data: {
-      step: "All chunks appended",
-      side: "server",
-      mergedPath,
-    },
-  });
-
-  return mergedPath;
-};
-
-const runFFmpeg = (args, cwd, testLogID) => {
-  return new Promise((resolve, reject) => {
-    const ffmpeg = spawn("ffmpeg", args, { cwd });
-
-    ffmpeg.stdout.on("data", (data) => {
-      logParameters({
-        testLogID,
-        data: { step: "ffmpeg stdout", side: "server", log: data.toString() },
-      });
-    });
-
-    ffmpeg.stderr.on("data", (data) => {
-      logParameters({
-        testLogID,
-        data: { step: "ffmpeg stderr", side: "server", log: data.toString() },
-      });
-    });
-
-    ffmpeg.on("close", (code) => {
-      if (code === 0) {
-        logParameters({
-          testLogID,
-          data: {
-            step: "ffmpeg resolved",
-            side: "server",
-            code: code,
-          },
-        });
-        resolve();
-      } else {
-        logParameters({
-          testLogID,
-          data: {
-            step: "ffmpeg rejected",
-            side: "server",
-            code: code,
-          },
-        });
-        reject(new Error(`ffmpeg exited with code ${code}`));
-      }
-    });
-  });
-};
-
-const fetchAndStoreAudio = async ({
-  agentId,
-  sessionId,
-  testLogID,
-  testName,
-  email,
-  attemptNo,
-}) => {
-  const headers = { "xi-api-key": ELEVEN_API_KEY };
-  const convoListRes = await axios.get(
-    "https://api.elevenlabs.io/v1/convai/conversations",
-    { headers, params: { agent_id: agentId } }
-  );
-
-  const conversationId = convoListRes.data?.conversations?.[0]?.conversation_id;
-  if (!conversationId) throw new Error("No conversation found for agent.");
-
-  logParameters({
-    testLogID,
-    data: {
-      step: "Convo List",
-      side: "server",
-      convoListRes: convoListRes,
-    },
-  });
-
-  const audioBuffer = await waitForAudio(
-    conversationId,
-    ELEVEN_API_KEY,
-    testLogID
-  );
-
-  const audioLocalDir = tmpDir("merge", sessionId, "audio");
-  await ensureDir(audioLocalDir);
-  const audioLocalPath = path.join(audioLocalDir, "audio.webm");
-  await fsp.writeFile(audioLocalPath, audioBuffer);
-
-  const audioGcsPath = `${ROOT_FOLDER}/${testName}/${email}/${attemptNo}-${sessionId}/audio/audio.webm`;
-
-  storage
-    .bucket(SESSION_BUCKET)
-    .file(audioGcsPath)
-    .save(audioBuffer, { contentType: "audio/webm" })
-    .then(() => {
-      logParameters({
-        testLogID,
-        data: {
-          step: "Audio upload success",
-          side: "server",
-          audioGcsPath,
-        },
-      });
-    })
-    .catch((err) => {
-      logParameters({
-        testLogID,
-        data: {
-          step: "Audio upload failed",
-          side: "server",
-          error: err.message,
-          audioGcsPath,
-        },
-      });
-    });
-
-  logParameters({
-    testLogID,
-    data: {
-      step: "Audio saved",
-      side: "server",
-      audioLocalPath,
-      audioGcsPath,
-      conversationId,
-    },
-  });
-
-  return { audioLocalPath, conversationId };
-};
-
-function waitForFile({
-  checkDir,
-  outDir,
-  finalLocalPath,
-  testLogID,
-  interval = 5000,
-  maxChecks = 12,
-}) {
-  return new Promise((resolve, reject) => {
-    let counter = 0;
-
-    const fileCheckInterval = setInterval(() => {
-      counter++;
-
-      if (counter >= maxChecks) {
-        clearInterval(fileCheckInterval);
-        reject(new Error("File not found within max checks" + finalLocalPath));
-      } else {
-        // --- Check checkDir ---
-        try {
-          const files = fs.readdirSync(checkDir);
-          files.forEach((file) => {
-            console.log(file);
-            logParameters({
-              testLogID,
-              data: { step: "Check checkDir", side: "server", file },
-            });
-          });
-        } catch (err) {
-          logParameters({
-            testLogID,
-            data: { step: "Check checkDir Fail", side: "server", err },
-          });
-          console.error("Error reading directory checkDir:", err);
-        }
-
-        // --- Check outDir ---
-        try {
-          const files = fs.readdirSync(outDir);
-          files.forEach((file) => {
-            console.log(file);
-            logParameters({
-              testLogID,
-              data: { step: "Check outDir", side: "server", file },
-            });
-          });
-        } catch (err) {
-          logParameters({
-            testLogID,
-            data: { step: "Check outDir Fail", side: "server", err },
-          });
-          console.error("Error reading directory outDir:", err);
-        }
-
-        // --- Final File Check ---
-        if (fs.existsSync(finalLocalPath)) {
-          logParameters({
-            testLogID,
-            data: {
-              step: "Final file exists" + finalLocalPath,
-              side: "server",
-              finalLocalPath,
-              date: new Date(),
-            },
-          });
-          clearInterval(fileCheckInterval);
-          resolve(true); // resolve with file path
-        }
-      }
-    }, interval);
-  });
-}
-
-const muxVideoAndAudio = async ({
-  mergedVideoPath,
-  audioLocalPath,
-  sessionId,
-  testLogID,
-}) => {
-  logParameters({
-    testLogID,
-    data: { step: "muxVideoAndAudio", side: "server" },
-  });
-  const outDir = tmpDir("merge", sessionId, "out");
-  const checkDir = tmpDir("merge", sessionId);
-
-  await ensureDir(outDir);
-  const finalLocalPath = path.join(outDir, "final.webm");
-
-  const args = [
-    "-hide_banner",
-    "-loglevel",
-    "warning",
-    "-itsoffset",
-    "1.6",
-    "-i",
-    mergedVideoPath,
-    "-i",
-    audioLocalPath,
-    "-map",
-    "0:v:0",
-    "-map",
-    "1:a:0",
-    "-c:v",
-    "libvpx",
-    "-c:a",
-    "libvorbis",
-    "-shortest",
-    "-y",
-    finalLocalPath,
-  ];
-
-  await runFFmpeg(args, outDir);
-
-  logParameters({
-    testLogID,
-    data: {
-      step: "Muxed final A/V file",
-      side: "server",
-      finalLocalPath,
-    },
-  });
-
-  const filesDoesExist = await waitForFile({
-    checkDir,
-    outDir,
-    finalLocalPath,
-    testLogID,
-  });
-
-  if (filesDoesExist) {
-    return finalLocalPath;
-  }
-};
-
-const uploadFinalVideo = async ({
-  localPath,
-  companyId,
-  testName,
-  email,
-  attemptNo,
-  testLogID,
-}) => {
-  logParameters({
-    testLogID,
-    data: { step: "uploadFinalVideo", side: "server" },
-  });
-
-  const sanitized = sanitizeEmail(email);
-  const finalFileName = `FinalVideo_${sanitized}_${attemptNo}.webm`;
-
-  const uniqFolder = `${attemptNo}-${Date.now()}`;
-  const dated = dateStamp();
-  const gcsPath = `${companyId}/${testName}/${sanitized}/${uniqFolder}/${dated}/${finalFileName}`;
-
-  await storage.bucket(SESSION_BUCKET).upload(localPath, {
-    destination: gcsPath,
-    contentType: "video/webm",
-    resumable: false,
-  });
-
-  const publicUrl = `https://storage.googleapis.com/${SESSION_BUCKET}/${gcsPath}`;
-
-  logParameters({
-    testLogID,
-    data: { step: "Final video uploaded", side: "server", gcsPath, publicUrl },
-  });
-
-  return { gcsPath, publicUrl };
-};
-
-app.post("/finalizeUpload2", async (req, res) => {
+app.post("/duplicateAgent", async (req, res) => {
   const {
-    companyId,
+    originalAgentId = "agent_7601k24j14jtfv6s6m3r46bcafxq",
     testName,
     email,
     attemptNo,
-    agentId,
-    sessionId,
-    testLogID,
-    firstName,
-    lastName,
-    token,
     persona,
-    requestID,
-  } = req.body || {};
-
-  const ctx = {
-    companyId,
-    testName,
-    email,
-    attemptNo,
-    agentId,
-    sessionId,
+    personality,
     testLogID,
-    requestID,
-  };
+  } = req.body;
+
+  if (!testName || !email || !attemptNo || !persona || !personality) {
+    return res.status(400).json({ error: "Missing required parameters." });
+  }
+
+  const newName = `Agent_${testName}_${email}_${attemptNo}_${persona}`;
+  const payload = { name: newName };
 
   try {
-    if (
-      !sessionId ||
-      !agentId ||
-      !email ||
-      !companyId ||
-      !testName ||
-      !attemptNo
-    ) {
-      return res.status(400).json({ error: "Missing required fields." });
+    await logParameters({
+      testLogID,
+      step: "Starting duplication",
+      side: "Server",
+      data: { payload },
+    });
+
+    const duplicateRes = await fetch(
+      `${ELEVEN_LABS_BASE_URL}/agents/${originalAgentId}/duplicate`,
+      {
+        method: "POST",
+        headers: {
+          "xi-api-key": ELEVEN_API_KEY,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+
+    const duplicateText = await duplicateRes.text();
+
+    await logParameters({
+      testLogID,
+      step: "Agent Duplicated",
+      side: "Server",
+      duplicate_agent_response: duplicateText,
+    });
+
+    if (!duplicateRes.ok) {
+      throw new Error(
+        `Duplication failed: ${duplicateRes.status} - ${duplicateText}`
+      );
     }
 
-    logParameters({
-      testLogID,
-      data: { step: "Finalize start", side: "server", ctx },
-    });
+    const duplicatedAgent = JSON.parse(duplicateText);
+    const newAgentId = duplicatedAgent.agent_id;
 
-    const { localDir, localPaths } = await downloadAllChunks(
-      sessionId,
-      testLogID,
-      testName,
-      email,
-      attemptNo
-    );
-    const mergedVideoPath = await mergeChunksByAppending({
-      localDir,
-      localPaths,
-      testLogID,
-    });
-    const { audioLocalPath, conversationId } = await fetchAndStoreAudio({
-      agentId,
-      sessionId,
-      testLogID,
-      testName,
-      email,
-      attemptNo,
-    });
-
-    const finalLocalPath = await muxVideoAndAudio({
-      mergedVideoPath,
-      audioLocalPath,
-      sessionId,
-      testLogID,
-    });
-
-    const { gcsPath, publicUrl, signedUrl } = await uploadFinalVideo({
-      localPath: finalLocalPath,
-      companyId,
-      testName,
-      email,
-      attemptNo,
-      testLogID,
-    });
-
-    const urlForInsights = signedUrl || publicUrl;
-    setImmediate(async () => {
-      try {
-        await getSessionInsights(
-          urlForInsights,
-          email,
-          firstName,
-          lastName,
-          testName,
-          attemptNo,
-          token,
-          persona,
-          testLogID
-        );
-      } catch (e) {
-        logParameters({
-          testLogID,
-          data: {
-            step: "Insights failed",
-            side: "server",
-            error: e?.response?.data || e.message,
-          },
-        });
-      }
-    });
-
-    // setImmediate(() =>
-    //   cleanupElevenLabs({ conversationId, agentId, testLogID })
-    // );
-
-    res.json({
-      success: true,
-      finalVideoUrl: publicUrl,
-      signedUrl,
-      gcsPath,
-    });
-
-    setImmediate(async () => {
-      try {
-        await Promise.all(
-          [...localPaths, mergedVideoPath, audioLocalPath, finalLocalPath].map(
-            (p) => safeUnlink(p)
-          )
-        );
-      } catch {}
-      try {
-        await fsp.rm(path.dirname(path.dirname(localDir)), {
-          recursive: true,
-          force: true,
-        });
-      } catch {}
-    });
-  } catch (err) {
-    logParameters({
-      testLogID,
-      data: {
-        step: "Finalize failed",
-        side: "server",
-        error: err?.stderr || err?.response?.data || err.message,
+    const updatePayload = {
+      conversation_config: {
+        agent: { initiates_conversation: true },
+        tts: { voice_id: personality.voiceId },
       },
+    };
+
+    const updateRes = await fetch(
+      `${ELEVEN_LABS_BASE_URL}/agents/${newAgentId}`,
+      {
+        method: "PATCH",
+        headers: {
+          "xi-api-key": ELEVEN_API_KEY,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(updatePayload),
+      }
+    );
+
+    const updateText = await updateRes.text();
+
+    await logParameters({
+      testLogID,
+      step: "Agent Updated",
+      side: "Server",
+      updated_agent_response: updateText,
     });
-    console.error("❌ Finalize failed:", err?.stderr || err);
-    res.status(500).json({ error: "Failed to finalize upload" });
+
+    if (!updateRes.ok) {
+      throw new Error(`Update failed: ${updateRes.status} - ${updateText}`);
+    }
+
+    const updatedAgent = JSON.parse(updateText);
+
+    await logParameters({
+      testLogID,
+      step: "Success",
+      side: "Server",
+      data: { newAgentId: updatedAgent.agent_id },
+    });
+
+    res.status(200).json({
+      message: "Agent duplicated and updated successfully",
+      agent_id: updatedAgent.agent_id,
+      details: updatedAgent,
+    });
+  } catch (error) {
+    console.error("❌ ElevenLabs Error:", error);
+    await logParameters({
+      testLogID,
+      step: "Error duplicating/updating ConvAI agent",
+      side: "Server",
+      error: error.message,
+    });
+    res.status(500).json({
+      error: "Failed to duplicate or update agent",
+      details: error.message,
+    });
   }
-});
-
-app.post("/log", (req, res) => {
-  const params = req.body;
-
-  if (!params || typeof params !== "object") {
-    return res
-      .status(400)
-      .json({ error: "Invalid parameters. Send a JSON object." });
-  }
-
-  logParameters(params);
-
-  res.json({ status: "Parameters logged successfully" });
 });
 
 const SCOPES = ["https://www.googleapis.com/auth/gmail.send"];
