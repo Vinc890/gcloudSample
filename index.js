@@ -37,28 +37,24 @@ async function logParameters(params) {
 }
 
 const processVoices = (data) => {
-  // Step 1: Filter to English voices and keep only relevant fields
+  if (!data?.voices) return {};
+
   const filtered = data.voices
-    .filter((v) => v.labels.language === "en")
+    .filter((v) => v.labels?.language === "en")
     .map((v) => ({
       voice_id: v.voice_id,
       labels: v.labels,
     }));
 
-  // Step 2: Build structured data by gender > accent > age
   const structure = {};
   filtered.forEach((v) => {
     const { gender, accent, age } = v.labels;
-    if (!structure[gender]) structure[gender] = {};
-    if (!structure[gender][accent]) structure[gender][accent] = new Set();
-    structure[gender][accent].add(age);
-  });
 
-  // Convert Sets to Arrays for React rendering
-  Object.keys(structure).forEach((g) => {
-    Object.keys(structure[g]).forEach((a) => {
-      structure[g][a] = Array.from(structure[g][a]);
-    });
+    if (!structure[gender]) structure[gender] = {};
+    if (!structure[gender][accent]) structure[gender][accent] = {};
+    if (!structure[gender][accent][age]) structure[gender][accent][age] = [];
+
+    structure[gender][accent][age].push(v.voice_id);
   });
 
   return structure;
