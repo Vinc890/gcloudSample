@@ -36,6 +36,34 @@ async function logParameters(params) {
   }
 }
 
+const processVoices = (data) => {
+  // Step 1: Filter to English voices and keep only relevant fields
+  const filtered = data.voices
+    .filter((v) => v.labels.language === "en")
+    .map((v) => ({
+      voice_id: v.voice_id,
+      labels: v.labels,
+    }));
+
+  // Step 2: Build structured data by gender > accent > age
+  const structure = {};
+  filtered.forEach((v) => {
+    const { gender, accent, age } = v.labels;
+    if (!structure[gender]) structure[gender] = {};
+    if (!structure[gender][accent]) structure[gender][accent] = new Set();
+    structure[gender][accent].add(age);
+  });
+
+  // Convert Sets to Arrays for React rendering
+  Object.keys(structure).forEach((g) => {
+    Object.keys(structure[g]).forEach((a) => {
+      structure[g][a] = Array.from(structure[g][a]);
+    });
+  });
+
+  return structure;
+};
+
 app.post("/conversation-token", async (req, res) => {
   const { agentId, testLogID } = req.body;
   logParameters({
@@ -265,6 +293,30 @@ app.post("/duplicateAgent", async (req, res) => {
       error: "Failed to duplicate or update agent",
       details: error.message,
     });
+  }
+});
+
+app.get("/getvoices", async (req, res) => {
+  try {
+    const response = await fetch("https://api.elevenlabs.io/v1/voices", {
+      headers: {
+        "xi-api-key": ELEVEN_API_KEY,
+      },
+    });
+
+    if (!response.ok) {
+      return res
+        .status(response.status)
+        .json({ error: "Failed to fetch voices from 11Labs" });
+    }
+
+    const data = await response.json();
+    const processed = processVoices(data);
+
+    res.json(processed);
+  } catch (error) {
+    console.error("Error fetching voices:", error);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
