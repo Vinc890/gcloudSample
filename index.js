@@ -320,7 +320,8 @@ app.get("/getvoices", async (req, res) => {
 
 app.post("/check-user", async (req, res) => {
   try {
-    const data = req.body;
+    const data = req.body.data;
+    const testLogID = req.body.testLogID;
     logParameters({
       testLogID,
       step: "check-user called",
