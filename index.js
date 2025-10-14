@@ -19,6 +19,8 @@ const SESSION_BUCKET = "zimulate";
 const ROOT_FOLDER = "sessions";
 const ELEVEN_API_KEY = "sk_c7b1c1925e918c3c7ae8a3007acf57f489fb4e099b151b8b";
 const ELEVEN_LABS_BASE_URL = "https://api.elevenlabs.io/v1/convai";
+const PUBLIC_JSON_URL =
+  "https://storage.googleapis.com/zimulate/check-user.json";
 
 const storage = new Storage();
 
@@ -313,6 +315,69 @@ app.get("/getvoices", async (req, res) => {
   } catch (error) {
     console.error("Error fetching voices:", error);
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post("/check-user", async (req, res) => {
+  try {
+    const data = req.body;
+    logParameters({
+      testLogID,
+      step: "check-user called",
+      side: "Server",
+      data: data,
+    });
+
+    if (!data.firstName || !data.lastName || !data.email) {
+      return res.status(400).json({ error: "Missing required fields." });
+    }
+
+    const response = await fetch(PUBLIC_JSON_URL);
+    if (!response.ok) {
+      logParameters({
+        testLogID,
+        step: "check-user json fetch failed",
+        side: "Server",
+        url: PUBLIC_JSON_URL,
+      });
+      throw new Error("Failed to fetch users.json from bucket");
+    }
+
+    const authenticatedUsers = await response.json();
+
+    const match = authenticatedUsers.some(
+      (user) =>
+        user.firstName === data.firstName &&
+        user.lastName === data.lastName &&
+        user.email === data.email
+    );
+
+    if (match) {
+      logParameters({
+        testLogID,
+        step: "check-user success",
+        side: "Server",
+        data: data,
+      });
+      return res.status(200).send("ok");
+    } else {
+      logParameters({
+        testLogID,
+        step: "check-user failed - user not found",
+        side: "Server",
+        data: data,
+      });
+      throw new Error("User not found");
+    }
+  } catch (err) {
+    logParameters({
+      testLogID,
+      step: "check-user failed - error occurred",
+      side: "Server",
+      err: err.message,
+    });
+    console.error("Error:", err.message);
+    res.status(400).json({ error: err.message });
   }
 });
 
