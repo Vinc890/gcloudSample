@@ -20,7 +20,7 @@ const ROOT_FOLDER = "sessions";
 const ELEVEN_API_KEY = "sk_c7b1c1925e918c3c7ae8a3007acf57f489fb4e099b151b8b";
 const ELEVEN_LABS_BASE_URL = "https://api.elevenlabs.io/v1/convai";
 const USERS_JSON_URL =
-  "https://storage.googleapis.com/zimulate/check-user.json";
+  "https://storage.googleapis.com/zimulate/user.json";
 
 const storage = new Storage();
 
