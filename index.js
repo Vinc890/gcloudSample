@@ -371,11 +371,14 @@ app.post("/check-user", async (req, res) => {
       throw new Error("User not found");
     }
   } catch (err) {
+    const data = req.body.data;
+    const testLogID = req.body.testLogID;
     logParameters({
       testLogID,
       step: "check-user failed - error occurred",
       side: "Server",
       err: err.message,
+      data: data,
     });
     console.error("Error:", err.message);
     res.status(400).json({ error: err.message });
