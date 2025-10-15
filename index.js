@@ -319,8 +319,9 @@ app.get("/getvoices", async (req, res) => {
 });
 
 app.post("/check-user", async (req, res) => {
+  const { firstName, lastName, email, testLogID } = req.body;
+
   try {
-    const { firstName, lastName, email, testLogID } = req.body;
     logParameters({
       testLogID,
       step: "check-user called",
@@ -363,7 +364,7 @@ app.post("/check-user", async (req, res) => {
         lastName: lastName,
         email: email,
       });
-      return res.status(200).send("ok");
+      return res.status(200).json({ message: "ok", testLogID });
     } else {
       logParameters({
         testLogID,
@@ -376,7 +377,6 @@ app.post("/check-user", async (req, res) => {
       throw new Error("User not found");
     }
   } catch (err) {
-    const { firstName, lastName, email, testLogID } = req.body;
     logParameters({
       testLogID,
       step: "check-user failed - error occurred",
