@@ -19,7 +19,7 @@ const SESSION_BUCKET = "zimulate";
 const ROOT_FOLDER = "sessions";
 const ELEVEN_API_KEY = "sk_c7b1c1925e918c3c7ae8a3007acf57f489fb4e099b151b8b";
 const ELEVEN_LABS_BASE_URL = "https://api.elevenlabs.io/v1/convai";
-const PUBLIC_JSON_URL =
+const USERS_JSON_URL =
   "https://storage.googleapis.com/zimulate/check-user.json";
 
 const storage = new Storage();
@@ -318,76 +318,38 @@ app.get("/getvoices", async (req, res) => {
   }
 });
 
-app.post("/check-user", async (req, res) => {
-  const { firstName, lastName, email, testLogID } = req.body;
-
+app.post("/login", async (req, res) => {
   try {
-    logParameters({
-      testLogID,
-      step: "check-user called",
-      side: "Server",
-      firstName: firstName,
-      lastName: lastName,
-      email: email,
-    });
+    const { email, password } = req.body;
 
-    if (!firstName || !lastName || !email) {
-      return res.status(400).json({ error: "Missing required fields." });
+    if (!email || !password) {
+      return res
+        .status(400)
+        .json({ error: "Email and password are required." });
     }
 
-    const response = await fetch(PUBLIC_JSON_URL);
+    const response = await fetch(USERS_JSON_URL);
     if (!response.ok) {
-      logParameters({
-        testLogID,
-        step: "check-user json fetch failed",
-        side: "Server",
-        url: PUBLIC_JSON_URL,
-      });
-      throw new Error("Failed to fetch users.json from bucket");
+      throw new Error("Failed to load user data from bucket.");
     }
 
-    const authenticatedUsers = await response.json();
+    const users = await response.json();
 
-    const match = authenticatedUsers.some(
-      (user) =>
-        user.firstName === firstName &&
-        user.lastName === lastName &&
-        user.email === email
+    const matchedUser = users.find(
+      (user) => user.email === email && user.password === password
     );
 
-    if (match) {
-      logParameters({
-        testLogID,
-        step: "check-user success",
-        side: "Server",
-        firstName: firstName,
-        lastName: lastName,
-        email: email,
-      });
-      return res.status(200).json({ message: "ok", testLogID });
+    if (matchedUser) {
+      const { firstName, lastName, email } = matchedUser;
+      return res.json({ success: true, user: { firstName, lastName, email } });
     } else {
-      logParameters({
-        testLogID,
-        step: "check-user failed - user not found",
-        side: "Server",
-        firstName: firstName,
-        lastName: lastName,
-        email: email,
-      });
-      throw new Error("User not found");
+      return res
+        .status(401)
+        .json({ success: false, error: "Invalid credentials" });
     }
   } catch (err) {
-    logParameters({
-      testLogID,
-      step: "check-user failed - error occurred",
-      side: "Server",
-      err: err.message,
-      firstName: firstName,
-      lastName: lastName,
-      email: email,
-    });
-    console.error("Error:", err.message);
-    res.status(400).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
