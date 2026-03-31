@@ -46,6 +46,7 @@ const processVoices = (data) => {
     .map((v) => ({
       voice_id: v.voice_id,
       labels: v.labels,
+      verified_languages: v.verified_languages ?? [],
     }));
 
   const structure = {};
@@ -56,7 +57,10 @@ const processVoices = (data) => {
     if (!structure[gender][accent]) structure[gender][accent] = {};
     if (!structure[gender][accent][age]) structure[gender][accent][age] = [];
 
-    structure[gender][accent][age].push(v.voice_id);
+    structure[gender][accent][age].push({
+      voice_id: v.voice_id,
+      verified_languages: v.verified_languages,
+    });
   });
 
   return structure;
