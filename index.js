@@ -46,7 +46,9 @@ const processVoices = (data) => {
     .map((v) => ({
       voice_id: v.voice_id,
       labels: v.labels,
-      verified_languages: v.verified_languages ?? [],
+      verified_languages: (v.verified_languages ?? [])
+        .map((lang) => lang?.language)
+        .filter(Boolean),
     }));
 
   const structure = {};
