@@ -19,8 +19,7 @@ const SESSION_BUCKET = "zimulate";
 const ROOT_FOLDER = "sessions";
 const ELEVEN_API_KEY = "sk_c7b1c1925e918c3c7ae8a3007acf57f489fb4e099b151b8b";
 const ELEVEN_LABS_BASE_URL = "https://api.elevenlabs.io/v1/convai";
-const USERS_JSON_URL =
-  "https://storage.googleapis.com/zimulate/user.json";
+const USERS_JSON_URL = "https://storage.googleapis.com/zimulate/user.json";
 
 const storage = new Storage();
 
@@ -30,7 +29,7 @@ async function logParameters(params) {
 
     const response = await axios.post(
       "https://cloud-run-logger-953332685815.asia-south1.run.app/log",
-      params
+      params,
     );
     console.log("Response from server:", response.data);
   } catch (error) {
@@ -87,7 +86,7 @@ app.post("/conversation-token", async (req, res) => {
           "xi-api-key": ELEVEN_API_KEY,
           "Content-Type": "application/json",
         },
-      }
+      },
     );
 
     const body = await response.json();
@@ -218,7 +217,7 @@ app.post("/duplicateAgent", async (req, res) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(payload),
-      }
+      },
     );
 
     const duplicateText = await duplicateRes.text();
@@ -232,7 +231,7 @@ app.post("/duplicateAgent", async (req, res) => {
 
     if (!duplicateRes.ok) {
       throw new Error(
-        `Duplication failed: ${duplicateRes.status} - ${duplicateText}`
+        `Duplication failed: ${duplicateRes.status} - ${duplicateText}`,
       );
     }
 
@@ -255,7 +254,7 @@ app.post("/duplicateAgent", async (req, res) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(updatePayload),
-      }
+      },
     );
 
     const updateText = await updateRes.text();
@@ -291,7 +290,13 @@ app.post("/duplicateAgent", async (req, res) => {
       testLogID,
       step: "Error duplicating/updating ConvAI agent",
       side: "Server",
-      error: error.message,
+      error: {
+        error: error.message,
+        api1: `${ELEVEN_LABS_BASE_URL}/agents/${originalAgentId}/duplicate`,
+        body1: JSON.stringify(payload),
+        api2: `${ELEVEN_LABS_BASE_URL}/agents/${newAgentId}`,
+        body2: JSON.stringify(updatePayload),
+      },
     });
     res.status(500).json({
       error: "Failed to duplicate or update agent",
@@ -342,7 +347,7 @@ app.post("/login", async (req, res) => {
     const users = await response.json();
 
     const matchedUser = users.find(
-      (user) => user.email === email && user.password === password
+      (user) => user.email === email && user.password === password,
     );
 
     if (matchedUser) {
